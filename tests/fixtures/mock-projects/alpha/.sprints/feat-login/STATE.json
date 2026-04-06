@@ -1,0 +1,10 @@
+{
+  "feature": "feat-login",
+  "branch": "main",
+  "created": "2026-04-01T10:00:00Z",
+  "phase": "BUILD",
+  "phase_history": [],
+  "qa_routing": { "has_ui": true },
+  "blocked": false,
+  "blocked_reason": null
+}

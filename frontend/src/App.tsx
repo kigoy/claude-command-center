@@ -5,6 +5,7 @@ import { Dashboard } from './pages/Dashboard';
 import { Terminal } from './pages/Terminal';
 import { Respond } from './pages/Respond';
 import { UpdateToast } from './components/UpdateToast';
+import { SprintDashboard } from './components/SprintDashboard';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const [auth, setAuth] = useState<'loading' | 'ok' | 'denied'>('loading');
@@ -29,6 +30,14 @@ export function App() {
         <Route path="/respond/:requestId" element={<Respond />} />
         <Route
           path="/"
+          element={
+            <ProtectedRoute>
+              <SprintDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/sessions"
           element={
             <ProtectedRoute>
               <Dashboard />

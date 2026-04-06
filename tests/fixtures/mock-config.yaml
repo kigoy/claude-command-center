@@ -1,0 +1,16 @@
+version: 1
+updated: 2026-04-06
+
+projects:
+  alpha:
+    path: FIXTURE_PATH/alpha
+    stack: typescript-next
+    has_deploy: false
+    default_qa_routing: has_ui
+
+  beta:
+    path: FIXTURE_PATH/beta
+    stack: python-django
+    has_deploy: true
+    deploy_url: https://beta.example.com
+    default_qa_routing: always

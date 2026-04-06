@@ -16,6 +16,8 @@ import { sendInput } from './input.js';
 import { notifyWaiting } from './notifier.js';
 import { startStatusPolling } from './status.js';
 import { createRequest, getRequest, setResponse, getResponse } from './mcp-responses.js';
+import sprintApi from './sprint-api.js';
+import { startSprintNotifications } from './sprint-notifications.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT || '3100', 10);
@@ -219,6 +221,10 @@ app.post('/api/mcp/respond', (req, res) => {
   res.json({ ok: true });
 });
 
+// --- Sprint Command API ---
+
+app.use('/api', sprintApi);
+
 // --- Sessions ---
 
 app.get('/api/sessions', (_req, res) => {
@@ -385,5 +391,6 @@ syncSessionsWithTmux();
 startStatusPolling();
 
 server.listen(PORT, () => {
-  console.log(`Command Center running on http://localhost:${PORT}`);
+  console.log(`Sprint Command Center running on http://localhost:${PORT}`);
+  startSprintNotifications();
 });

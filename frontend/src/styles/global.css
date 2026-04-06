@@ -462,6 +462,190 @@ textarea:focus {
   font-size: 0.8rem;
 }
 
+/* Sprint Dashboard */
+
+.offline-banner {
+  background: #b71c1c;
+  color: #fff;
+  text-align: center;
+  padding: 8px;
+  font-size: 14px;
+}
+
+/* Project Group */
+
+.project-group {
+  margin-bottom: 1.5rem;
+}
+
+.project-group-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.project-group-header h2 {
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.project-stack {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+
+.project-empty {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  padding: 0.5rem 0;
+}
+
+.sprint-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* Sprint Card */
+
+.sprint-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  transition: border-color 0.15s;
+}
+
+.sprint-card:hover {
+  border-color: var(--accent);
+}
+
+.sprint-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 200px;
+}
+
+.sprint-phase-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.sprint-feature-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sprint-blocked-badge {
+  font-size: 0.6rem;
+  font-weight: 700;
+  background: var(--danger);
+  color: #fff;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.sprint-card-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.sprint-atoms-row {
+  margin-bottom: 0.15rem;
+}
+
+.sprint-atoms-text {
+  font-family: monospace;
+  font-size: 0.75rem;
+  color: var(--text);
+  letter-spacing: 0.02em;
+}
+
+.sprint-next-action {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sprint-meta {
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  margin-top: 0.1rem;
+}
+
+.sprint-card-actions {
+  flex-shrink: 0;
+}
+
+.terminal-btn {
+  font-size: 0.75rem;
+  padding: 0.35rem 0.75rem;
+  background: var(--border);
+  color: var(--text);
+  border-radius: 5px;
+  white-space: nowrap;
+}
+
+.terminal-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Recommendation bar */
+
+.recommendation-bar {
+  margin-top: 1.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.recommendation-bar strong {
+  color: var(--text);
+  margin-right: 0.5rem;
+}
+
+/* Sprint dashboard mobile */
+
+@media (max-width: 768px) {
+  .sprint-card {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .sprint-card-header {
+    min-width: 0;
+  }
+
+  .sprint-card-actions {
+    align-self: flex-end;
+  }
+}
+
 /* Respond page (MCP ask_user) */
 
 .respond-page {

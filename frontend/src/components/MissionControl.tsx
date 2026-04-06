@@ -273,6 +273,7 @@ export function MissionControl() {
       {showExploreIdea && (
         <ExploreIdeaDialog
           groups={data?.groups ?? []}
+          projects={data?.projects ?? []}
           onClose={() => setShowExploreIdea(false)}
           onCreated={(result) => {
             setShowExploreIdea(false);

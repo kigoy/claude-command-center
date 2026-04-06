@@ -603,9 +603,9 @@ router.post('/projects', (req, res) => {
   }
 });
 
-/** POST /api/explore-idea — create a new idea project from scratch */
+/** POST /api/explore-idea — explore in existing project or create new project */
 router.post('/explore-idea', (req, res) => {
-  const { name, description, group } = req.body;
+  const { name, description, group, projectId } = req.body;
   if (!name) {
     res.status(400).json({ error: 'name is required' });
     return;
@@ -617,6 +617,61 @@ router.post('/explore-idea', (req, res) => {
     return;
   }
 
+  // --- Mode: existing project (creates a sprint inside it) ---
+  if (projectId) {
+    const project = getProjects().find((p) => p.id === projectId);
+    if (!project) {
+      res.status(404).json({ error: `Project '${projectId}' not found` });
+      return;
+    }
+
+    const dirName = `feat-${slug}`;
+    const sprintDir = join(project.path, '.sprints', dirName);
+    if (existsSync(sprintDir)) {
+      res.status(409).json({ error: `Sprint '${dirName}' already exists in ${projectId}` });
+      return;
+    }
+
+    try {
+      mkdirSync(sprintDir, { recursive: true });
+      const now = new Date().toISOString();
+      const state = {
+        feature: dirName,
+        branch: 'main',
+        created: now,
+        phase: 'PLAN',
+        phase_history: [{ phase: 'PLAN', entered: now }],
+        qa_routing: {},
+        blocked: false,
+        blocked_reason: null,
+      };
+      writeFileSync(join(sprintDir, 'STATE.json'), JSON.stringify(state, null, 2) + '\n');
+
+      // Open tmux session
+      const sessionName = `${projectId}-${slug}`;
+      try {
+        execFileSync('tmux', ['new-session', '-d', '-s', sessionName, '-c', project.path], { stdio: 'ignore' });
+        if (description) {
+          const prompt = `/office-hours ${description.slice(0, 200)}`;
+          execFileSync('tmux', ['send-keys', '-t', sessionName, '-l', 'claude']);
+          execFileSync('tmux', ['send-keys', '-t', sessionName, 'Enter']);
+          setTimeout(() => {
+            const { execFile } = require('child_process');
+            execFile('tmux', ['send-keys', '-t', sessionName, '-l', prompt], () => {
+              execFile('tmux', ['send-keys', '-t', sessionName, 'Enter'], () => {});
+            });
+          }, 5000);
+        }
+      } catch { /* tmux not available */ }
+
+      res.status(201).json({ projectId, session: sessionName, path: project.path, feature: dirName });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+    return;
+  }
+
+  // --- Mode: new project (creates directory + config entry) ---
   const projectPath = `/Volumes/Extreme Pro/${slug}`;
   if (existsSync(projectPath)) {
     res.status(409).json({ error: `Directory already exists: ${projectPath}` });
@@ -624,14 +679,11 @@ router.post('/explore-idea', (req, res) => {
   }
 
   try {
-    // Create project directory structure
     mkdirSync(projectPath, { recursive: true });
 
-    // Write starter CLAUDE.md
     const claudeMd = `# ${slug}\n\n${description || 'New exploration project.'}\n\n## Status\n\nExploration phase.\n`;
     writeFileSync(join(projectPath, 'CLAUDE.md'), claudeMd);
 
-    // Create sprint directory with STATE.json
     const sprintDir = join(projectPath, '.sprints', 'feat-exploration');
     mkdirSync(sprintDir, { recursive: true });
     const now = new Date().toISOString();
@@ -647,24 +699,15 @@ router.post('/explore-idea', (req, res) => {
     };
     writeFileSync(join(sprintDir, 'STATE.json'), JSON.stringify(state, null, 2) + '\n');
 
-    // Add to config.yaml
-    addProject(slug, {
-      path: projectPath,
-      stack: 'other',
-      has_deploy: false,
-    }, group || undefined);
+    addProject(slug, { path: projectPath, stack: 'other', has_deploy: false }, group || undefined);
 
-    // Open tmux session
     const sessionName = `${slug}-exploration`;
     try {
       execFileSync('tmux', ['new-session', '-d', '-s', sessionName, '-c', projectPath], { stdio: 'ignore' });
-
-      // Send claude + /office-hours description (non-blocking)
       if (description) {
         const prompt = `/office-hours ${description.slice(0, 200)}`;
         execFileSync('tmux', ['send-keys', '-t', sessionName, '-l', 'claude']);
         execFileSync('tmux', ['send-keys', '-t', sessionName, 'Enter']);
-        // Wait for Claude to start, then send prompt (async to avoid blocking event loop)
         setTimeout(() => {
           const { execFile } = require('child_process');
           execFile('tmux', ['send-keys', '-t', sessionName, '-l', prompt], () => {
@@ -672,9 +715,7 @@ router.post('/explore-idea', (req, res) => {
           });
         }, 5000);
       }
-    } catch {
-      // tmux not available — non-fatal
-    }
+    } catch { /* tmux not available */ }
 
     res.status(201).json({ projectId: slug, session: sessionName, path: projectPath, feature: 'feat-exploration' });
   } catch (err: any) {

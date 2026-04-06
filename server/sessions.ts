@@ -43,6 +43,16 @@ export function createSession(
   command?: string,
   opts?: CreateSessionOpts,
 ): Session {
+  // Reuse existing running session with the same name
+  const all = getAllSessions();
+  for (const existing of all) {
+    if (existing.name !== name || existing.status !== 'running') continue;
+    const tmux = existing.tmux_name || `${TMUX_PREFIX}${existing.id}`;
+    if (tmuxSessionExists(tmux)) return existing;
+    // tmux gone but DB says running — mark dead
+    updateSessionStatus(existing.id, 'dead');
+  }
+
   const id = nanoid(10);
 
   // Attach to existing tmux session (sprint terminal) — skip creating a new one

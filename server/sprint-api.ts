@@ -7,6 +7,8 @@ import { readSprintState, writeSprintState, deriveChainStatus, type SprintState,
 import { rankRecommendations, type SprintContext } from './sprint-recommendations.js';
 import { buildRetroSummary, markRetroRun } from './sprint-retro.js';
 import { buildAnalytics } from './sprint-analytics.js';
+import { suggestSkills } from './sprint-suggestions.js';
+import { getSprintSessions } from './tmux-detect.js';
 
 const router = Router();
 
@@ -35,6 +37,7 @@ interface SprintSummary {
   tmux_session: string;
   tmux_active: boolean;
   chain_status: ChainStatus;
+  suggestions: string[];
 }
 
 interface ProjectSummary {
@@ -112,30 +115,22 @@ function resolveAtomCounts(
   return { ...fromFile, has_atoms: true };
 }
 
-/** Get active tmux session names. */
-function getActiveTmuxSessions(): Set<string> {
-  try {
-    const output = execFileSync('tmux', ['list-sessions', '-F', '#{session_name}'], {
-      encoding: 'utf-8',
-      timeout: 3000,
-    });
-    return new Set(output.trim().split('\n').filter(Boolean));
-  } catch {
-    return new Set();
+/** Find a matching tmux session for a sprint from the cached background poller.
+ *  Returns the session name if found, null otherwise. */
+function findTmuxSession(projectId: string, feature: string): string | null {
+  const featureBase = feature.replace(/^feat-/, '');
+  for (const s of getSprintSessions()) {
+    if (s.projectId === projectId && s.feature === featureBase) {
+      return s.sessionName;
+    }
   }
-}
-
-/** Derive the expected tmux session name for a sprint. */
-function sprintTmuxName(projectId: string, feature: string): string {
-  const name = feature.replace(/^feat-/, '');
-  return `${projectId}-${name}`;
+  return null;
 }
 
 /** List all sprints for a project by reading its .sprints/ directory. */
 function listSprintsForProject(
   projectId: string,
   projectPath: string,
-  activeTmux: Set<string>,
 ): SprintSummary[] {
   const sprintsDir = join(projectPath, '.sprints');
   if (!existsSync(sprintsDir)) return [];
@@ -168,7 +163,9 @@ function listSprintsForProject(
       }
 
       const atoms = resolveAtomCounts(featureDir, state);
-      const tmuxSession = sprintTmuxName(projectId, state.feature);
+      const tmuxMatch = findTmuxSession(projectId, state.feature);
+      const lastActivity = getLastActivity(state);
+      const hasUi = state.qa_routing?.has_ui === true;
       sprints.push({
         feature: state.feature,
         phase: state.phase,
@@ -177,11 +174,18 @@ function listSprintsForProject(
         atoms_total: atoms.total,
         atoms_completed: atoms.completed,
         has_atoms: atoms.has_atoms,
-        last_activity: getLastActivity(state),
+        last_activity: lastActivity,
         branch: state.branch,
-        tmux_session: tmuxSession,
-        tmux_active: activeTmux.has(tmuxSession),
+        tmux_session: tmuxMatch ?? `${projectId}-${state.feature.replace(/^feat-/, '')}`,
+        tmux_active: tmuxMatch !== null,
         chain_status: deriveChainStatus(state),
+        suggestions: suggestSkills({
+          feature: state.feature,
+          phase: state.phase,
+          blocked: state.blocked,
+          last_activity: lastActivity,
+          has_ui: hasUi,
+        }),
       });
     }
   } catch {
@@ -193,14 +197,13 @@ function listSprintsForProject(
 // --- Shared ---
 
 function buildProjectSummaries(): ProjectSummary[] {
-  const activeTmux = getActiveTmuxSessions();
   return getProjects().map((p) => ({
     id: p.id,
     path: p.path,
     stack: p.stack,
     has_deploy: p.has_deploy,
     deploy_url: p.deploy_url,
-    sprints: listSprintsForProject(p.id, p.path, activeTmux),
+    sprints: listSprintsForProject(p.id, p.path),
   }));
 }
 
@@ -219,7 +222,7 @@ router.get('/projects/:id/sprints', (req, res) => {
     res.status(404).json({ error: `Project '${req.params.id}' not found` });
     return;
   }
-  res.json(listSprintsForProject(project.id, project.path, getActiveTmuxSessions()));
+  res.json(listSprintsForProject(project.id, project.path));
 });
 
 /** GET /api/sprints/:projectId/:featureId/state — raw STATE.json */
@@ -366,16 +369,15 @@ router.get('/sprints/:projectId/:featureId/detail', (req, res) => {
   }
 
   const atoms = resolveAtomCounts(sprintDir, state);
-  const tmuxSession = sprintTmuxName(project.id, state.feature);
-  const activeTmux = getActiveTmuxSessions();
+  const tmuxMatch = findTmuxSession(project.id, state.feature);
 
   res.json({
     ...state,
     atoms_total: atoms.total,
     atoms_completed: atoms.completed,
     has_atoms: atoms.has_atoms,
-    tmux_session: tmuxSession,
-    tmux_active: activeTmux.has(tmuxSession),
+    tmux_session: tmuxMatch ?? `${project.id}-${state.feature.replace(/^feat-/, '')}`,
+    tmux_active: tmuxMatch !== null,
     chain_status: deriveChainStatus(state),
   });
 });
@@ -421,7 +423,7 @@ router.post('/sprints/:projectId/:featureId/exec', (req, res) => {
     return;
   }
 
-  const sessionName = sprintTmuxName(req.params.projectId, featureId);
+  const sessionName = `${req.params.projectId}-${featureId.replace(/^feat-/, '')}`;
 
   // Check if tmux session exists, create if not
   try {
@@ -537,6 +539,74 @@ router.post('/retro/mark', (_req, res) => {
 /** GET /api/analytics — sprint analytics: time-in-phase, compliance, atoms-per-sprint */
 router.get('/analytics', (_req, res) => {
   res.json(buildAnalytics());
+});
+
+/** GET /api/briefing — morning briefing: sprint status + sync report + retro summary */
+router.get('/briefing', (_req, res) => {
+  const GSTACK_ROOT = process.env.GSTACK_ROOT || '/Volumes/Extreme Pro/.gstack';
+  const diffReportPath = join(GSTACK_ROOT, 'sync', 'diff-report.md');
+
+  // Sprint status from dashboard
+  const projects = buildProjectSummaries();
+  const sprintStatus = projects.map((p) => ({
+    id: p.id,
+    active_sprints: p.sprints.filter((s) => s.phase !== 'COMPLETE').length,
+    top_sprint: p.sprints.find((s) => s.phase !== 'COMPLETE')?.feature ?? null,
+  }));
+
+  // Sync report if updated in last 24h
+  let syncReport: string | null = null;
+  try {
+    const stat = require('fs').statSync(diffReportPath);
+    const ageHours = (Date.now() - stat.mtimeMs) / (1000 * 60 * 60);
+    if (ageHours < 24) {
+      syncReport = readFileSync(diffReportPath, 'utf-8');
+    }
+  } catch {
+    // No diff report
+  }
+
+  // Retro summary if due
+  const retro = buildRetroSummary();
+  const retroSummary = retro.retro_due ? {
+    retro_due: true,
+    days_since_last: retro.days_since_last_retro,
+    sprints_completed: retro.aggregate.sprints_completed,
+    atoms_shipped: retro.aggregate.atoms_shipped,
+    chain_compliance_pct: retro.aggregate.chain_compliance_pct,
+  } : null;
+
+  res.json({
+    generated_at: new Date().toISOString(),
+    sprint_status: sprintStatus,
+    sync_report: syncReport,
+    retro_summary: retroSummary,
+  });
+});
+
+/** GET /api/skills/new — check for newly detected upstream skills */
+router.get('/skills/new', (_req, res) => {
+  const GSTACK_ROOT = process.env.GSTACK_ROOT || '/Volumes/Extreme Pro/.gstack';
+  const newSkillsPath = join(GSTACK_ROOT, 'sync', 'new-skills.json');
+  try {
+    const raw = readFileSync(newSkillsPath, 'utf-8');
+    res.json(JSON.parse(raw));
+  } catch {
+    res.json([]);
+  }
+});
+
+/** POST /api/skills/new/dismiss — clear new-skills notification */
+router.post('/skills/new/dismiss', (_req, res) => {
+  const GSTACK_ROOT = process.env.GSTACK_ROOT || '/Volumes/Extreme Pro/.gstack';
+  const newSkillsPath = join(GSTACK_ROOT, 'sync', 'new-skills.json');
+  try {
+    const { unlinkSync } = require('fs');
+    unlinkSync(newSkillsPath);
+  } catch {
+    // File may not exist — that's fine
+  }
+  res.json({ dismissed: true });
 });
 
 export default router;

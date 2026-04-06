@@ -3,19 +3,22 @@ import { useNavigate } from 'react-router-dom';
 import { Sidebar, type OpenTerminal } from './Sidebar';
 import { TerminalPanel } from './TerminalPanel';
 import { GroupSection } from './GroupSection';
+import { PipelineBoard } from './PipelineBoard';
+import { CommandPalette } from './CommandPalette';
 import { NewSprintDialog } from './NewSprintDialog';
 import { ExploreIdeaDialog } from './ExploreIdeaDialog';
 import { AddProjectDialog } from './AddProjectDialog';
 import { AnalyticsTab } from './AnalyticsTab';
 import { UpdateToast } from './UpdateToast';
 import { useSprintSSE } from '../hooks/use-sprint-sse';
+import { useBoard } from '../hooks/use-board';
 import type { DashboardData, TmuxSession } from '../types';
 
-type View = 'dashboard' | 'analytics' | 'settings';
+type View = 'dashboard' | 'board' | 'analytics' | 'settings';
 
 export function MissionControl() {
   const navigate = useNavigate();
-  const [activeView, setActiveView] = useState<View | null>('dashboard');
+  const [activeView, setActiveView] = useState<View | null>('board');
   const [activeTerminalId, setActiveTerminalId] = useState<string | null>(null);
   const [openTerminals, setOpenTerminals] = useState<OpenTerminal[]>([]);
   const [data, setData] = useState<DashboardData | null>(null);
@@ -24,9 +27,14 @@ export function MissionControl() {
   const [newSprintProject, setNewSprintProject] = useState<string | null>(null);
   const [showExploreIdea, setShowExploreIdea] = useState(false);
   const [showAddProject, setShowAddProject] = useState(false);
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [selectedSprint, setSelectedSprint] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
+  const [terminalSnippets, setTerminalSnippets] = useState<Map<string, string[]>>(new Map());
   const failCount = useRef(0);
-  const openingTerminals = useRef(new Set<string>()); // in-flight guard for duplicate prevention
+  const openingTerminals = useRef(new Set<string>());
+
+  const { columns, allSprints, doneCount, showDone, setShowDone } = useBoard(data);
 
   // --- Data fetching ---
 
@@ -69,7 +77,7 @@ export function MissionControl() {
       if (!prev) return prev;
       const projects = prev.projects.map((p) => {
         if (p.id !== event.projectId) return p;
-        const sprints = p.sprints.map((s) =>
+        const sprints = (p.sprints ?? []).map((s) =>
           s.feature === event.feature ? { ...s, ...event.sprint } : s,
         );
         const exists = sprints.some((s) => s.feature === event.feature);
@@ -78,6 +86,51 @@ export function MissionControl() {
       return { ...prev, projects };
     });
   }, []));
+
+  // SSE for terminal snippets (last 3 lines per active session)
+  useEffect(() => {
+    let es: EventSource | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let unmounted = false;
+
+    function connect() {
+      if (unmounted) return;
+      es = new EventSource('/api/terminal-snippets');
+      es.addEventListener('terminal-snippet', (event) => {
+        try {
+          const data = JSON.parse(event.data) as { key: string; lines: string[] };
+          setTerminalSnippets((prev) => {
+            const next = new Map(prev);
+            next.set(data.key, data.lines);
+            return next;
+          });
+        } catch { /* ignore */ }
+      });
+      es.onerror = () => {
+        es?.close();
+        es = null;
+        if (!unmounted) reconnectTimer = setTimeout(connect, 5000);
+      };
+    }
+    connect();
+    return () => {
+      unmounted = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      es?.close();
+    };
+  }, []);
+
+  // Cmd+K command palette
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setShowCommandPalette((v) => !v);
+      }
+    }
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, []);
 
   // --- Terminal management ---
 
@@ -200,7 +253,35 @@ export function MissionControl() {
       />
 
       <main className="mc-content">
-        {/* Dashboard view */}
+        {/* Pipeline Board view (default) */}
+        {!showingTerminal && activeView === 'board' && (
+          <PipelineBoard
+            columns={columns}
+            doneCount={doneCount}
+            showDone={showDone}
+            onToggleDone={() => setShowDone(!showDone)}
+            selectedSprint={selectedSprint}
+            onSelectSprint={(key) => {
+              setSelectedSprint(key);
+              if (key) {
+                const sprint = allSprints.find(
+                  (s) => `${s.projectId}-${s.feature}` === key,
+                );
+                if (sprint) {
+                  openTerminalForSprint(
+                    `${sprint.projectId}/${sprint.feature}`,
+                    sprint.projectPath,
+                    sprint.tmux_session || undefined,
+                  );
+                }
+              }
+            }}
+            onOpenTerminal={openTerminalForSprint}
+            terminalSnippets={terminalSnippets}
+          />
+        )}
+
+        {/* Legacy dashboard view */}
         {!showingTerminal && activeView === 'dashboard' && (
           <div className="dashboard-content">
             {!data && <p className="empty">Loading...</p>}
@@ -253,6 +334,15 @@ export function MissionControl() {
           />
         ))}
       </main>
+
+      {/* Command Palette (Cmd+K) */}
+      {showCommandPalette && (
+        <CommandPalette
+          sprints={allSprints}
+          onOpenTerminal={openTerminalForSprint}
+          onClose={() => setShowCommandPalette(false)}
+        />
+      )}
 
       {/* Modals */}
       {newSprintProject !== null && data && (

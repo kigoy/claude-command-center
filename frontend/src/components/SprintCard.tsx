@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { PhaseStepper } from './PhaseStepper';
 import { SprintTimeline } from './SprintTimeline';
 import { SprintActions } from './SprintActions';
+import { getHealth, HEALTH_COLORS, timeAgo, nextAction } from '../utils/sprint-health';
 import type { SprintSummary, SprintDetail, PhaseHistoryEntry, Phase } from '../types';
 
 interface Props {
@@ -9,47 +10,6 @@ interface Props {
   projectId: string;
   projectPath: string;
   onOpenTerminal?: (name: string, cwd: string, tmuxSession?: string) => void;
-}
-
-const HEALTH_COLORS: Record<string, string> = {
-  on_track: '#4caf50',
-  stale: '#ff9800',
-  blocked: '#f44336',
-  waiting: '#9e9e9e',
-  complete: '#607d8b',
-};
-
-function getHealth(sprint: SprintSummary): string {
-  if (sprint.phase === 'COMPLETE') return 'complete';
-  if (sprint.blocked) return 'blocked';
-  const hours = (Date.now() - new Date(sprint.last_activity).getTime()) / 3600000;
-  if (hours > 4) return 'stale';
-  return 'on_track';
-}
-
-function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  if (isNaN(diff)) return '';
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
-
-function nextAction(s: SprintSummary): string {
-  if (s.blocked) return `Blocked: ${s.blocked_reason || 'unknown'}`;
-  switch (s.phase) {
-    case 'PLAN': return 'Continue planning';
-    case 'BUILD': return s.atoms_total > 0
-      ? `Build atom ${s.atoms_completed + 1}/${s.atoms_total}`
-      : s.has_atoms ? 'Start building' : 'Run /atomize';
-    case 'REVIEW': return 'Run /review';
-    case 'QA': return 'Run /qa';
-    case 'SHIP': return 'Ship it';
-    case 'COMPLETE': return 'Done';
-    default: return s.phase;
-  }
 }
 
 /** Live counter showing time in current phase */

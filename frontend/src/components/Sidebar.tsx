@@ -10,11 +10,11 @@ export interface OpenTerminal {
 interface Props {
   data: DashboardData | null;
   tmuxSessions: TmuxSession[];
-  activeView: 'dashboard' | 'analytics' | 'settings' | null;
+  activeView: 'dashboard' | 'board' | 'analytics' | 'settings' | null;
   activeTerminalId: string | null;
   openTerminals: OpenTerminal[];
   unreadSessions: Set<string>;
-  onSelectView: (view: 'dashboard' | 'analytics' | 'settings') => void;
+  onSelectView: (view: 'dashboard' | 'board' | 'analytics' | 'settings') => void;
   onSelectSession: (session: TmuxSession) => void;
   onNewSprint: (projectId: string) => void;
   onExploreIdea: () => void;
@@ -40,6 +40,12 @@ export function Sidebar({
       </button>
 
       <nav className="mc-sidebar-nav">
+        <button
+          className={`mc-nav-item${activeView === 'board' ? ' mc-nav-item--active' : ''}`}
+          onClick={() => onSelectView('board')}
+        >
+          ⚡ BOARD
+        </button>
         <button
           className={`mc-nav-item${activeView === 'dashboard' ? ' mc-nav-item--active' : ''}`}
           onClick={() => onSelectView('dashboard')}

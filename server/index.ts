@@ -18,6 +18,7 @@ import { startStatusPolling } from './status.js';
 import { createRequest, getRequest, setResponse, getResponse } from './mcp-responses.js';
 import sprintApi from './sprint-api.js';
 import { setupSprintSSE } from './sprint-sse.js';
+import { setupTerminalSnippets } from './terminal-snippets.js';
 import { startTmuxDetection, getSprintSessions } from './tmux-detect.js';
 import { startSprintNotifications } from './sprint-notifications.js';
 
@@ -230,6 +231,10 @@ app.use('/api', sprintApi);
 // --- Sprint SSE (live updates) ---
 
 setupSprintSSE(app);
+
+// --- Terminal Snippets SSE (mini-previews for board cards) ---
+
+setupTerminalSnippets(app);
 
 // --- Tmux Sprint Sessions ---
 

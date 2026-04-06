@@ -99,9 +99,10 @@ export function SprintCard({ sprint, projectId, projectPath }: Props) {
     } catch { /* ignore */ }
   }, [projectId, sprint.feature]);
 
+  // Re-fetch detail when expanded or when phase changes (SSE update)
   useEffect(() => {
-    if (expanded && !detail) fetchDetail();
-  }, [expanded, detail, fetchDetail]);
+    if (expanded) fetchDetail();
+  }, [expanded, sprint.phase, fetchDetail]);
 
   function handleTerminal(e: React.MouseEvent) {
     e.stopPropagation();

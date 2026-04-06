@@ -1,8 +1,9 @@
 import { type Express, type Request, type Response } from 'express';
-import { watch, type FSWatcher, readFileSync, existsSync } from 'fs';
+import { watch, type FSWatcher, existsSync } from 'fs';
 import { join, basename, dirname } from 'path';
 import { getProjects, type ProjectConfig } from './sprint-config.js';
 import { readSprintState, deriveChainStatus } from './sprint-state.js';
+import { parseAtomCounts } from './sprint-atoms.js';
 
 // --- Types ---
 
@@ -25,23 +26,6 @@ const watchers: FSWatcher[] = [];
 const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 // --- Helpers ---
-
-/** Parse ATOMS.md for counts (mirrors sprint-api logic). */
-function parseAtomCounts(sprintDir: string): { total: number; completed: number } | null {
-  const atomsPath = join(sprintDir, 'ATOMS.md');
-  try {
-    const raw = readFileSync(atomsPath, 'utf-8');
-    const statusLines = raw.match(/^- Status:\s*.+$/gm) || [];
-    const total = statusLines.length;
-    const completed = statusLines.filter(
-      (line) => /\bDONE\b/i.test(line) || /\bCOMPLETE\b/i.test(line) || line.includes('\u2705'),
-    ).length;
-    const headingCompleted = (raw.match(/^###\s+Atom\s+\d+:.+\u2705/gm) || []).length;
-    return { total, completed: Math.max(completed, headingCompleted) };
-  } catch {
-    return null;
-  }
-}
 
 /** Build a sprint summary from a sprint directory. */
 function buildSprintPayload(projectId: string, sprintDir: string): SprintUpdatePayload | null {
@@ -94,23 +78,50 @@ function handleFileChange(project: ProjectConfig, sprintDir: string): void {
   );
 }
 
-/** Start watching a single .sprints/ directory. */
+/** Track watched sprint subdirs to avoid duplicate watchers */
+const watchedDirs = new Set<string>();
+
+/** Watch a specific sprint feature directory for STATE.json / ATOMS.md changes. */
+function watchFeatureDir(project: ProjectConfig, sprintDir: string): void {
+  if (watchedDirs.has(sprintDir) || !existsSync(sprintDir)) return;
+  watchedDirs.add(sprintDir);
+
+  try {
+    const watcher = watch(sprintDir, (_event, filename) => {
+      if (!filename) return;
+      if (filename !== 'STATE.json' && filename !== 'ATOMS.md') return;
+      handleFileChange(project, sprintDir);
+    });
+    watchers.push(watcher);
+  } catch (err) {
+    console.warn(`[sprint-sse] Failed to watch ${sprintDir}: ${err}`);
+  }
+}
+
+/** Start watching a .sprints/ directory. Watches existing subdirs and detects new ones. */
 function watchSprintsDir(project: ProjectConfig): void {
   const sprintsDir = join(project.path, '.sprints');
   if (!existsSync(sprintsDir)) return;
 
+  // Watch existing feature dirs
   try {
-    const watcher = watch(sprintsDir, { recursive: true }, (_event, filename) => {
-      if (!filename) return;
-      const base = basename(filename);
-      if (base !== 'STATE.json' && base !== 'ATOMS.md') return;
+    const { readdirSync } = require('fs');
+    const entries = readdirSync(sprintsDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory() && !entry.name.startsWith('_')) {
+        watchFeatureDir(project, join(sprintsDir, entry.name));
+      }
+    }
+  } catch { /* ignore */ }
 
-      // filename is relative to sprintsDir, e.g. "feat-foo/STATE.json"
-      const featureDir = dirname(filename);
-      const sprintDir = join(sprintsDir, featureDir);
-      handleFileChange(project, sprintDir);
+  // Watch the parent .sprints/ dir for new subdirectories
+  try {
+    const parentWatcher = watch(sprintsDir, (event, filename) => {
+      if (!filename || event !== 'rename') return;
+      const newDir = join(sprintsDir, filename);
+      if (existsSync(newDir)) watchFeatureDir(project, newDir);
     });
-    watchers.push(watcher);
+    watchers.push(parentWatcher);
   } catch (err) {
     console.warn(`[sprint-sse] Failed to watch ${sprintsDir}: ${err}`);
   }

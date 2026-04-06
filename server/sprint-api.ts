@@ -4,6 +4,7 @@ import { join } from 'path';
 import { execFileSync } from 'child_process';
 import { getProjects, getGroups } from './sprint-config.js';
 import { readSprintState, writeSprintState, deriveChainStatus, type SprintState, type ChainStatus } from './sprint-state.js';
+import { resolveAtomCounts } from './sprint-atoms.js';
 import { rankRecommendations, type SprintContext } from './sprint-recommendations.js';
 import { buildRetroSummary, markRetroRun } from './sprint-retro.js';
 import { buildAnalytics } from './sprint-analytics.js';
@@ -51,69 +52,13 @@ interface ProjectSummary {
 
 // --- Helpers ---
 
-/** Sanitize path segment to prevent directory traversal */
+/** Sanitize path segment to prevent directory traversal and null byte injection */
 function sanitizeSegment(segment: string): string {
+  if (segment.includes('\x00')) return '';
   return segment.replace(/[\/\\\.]+/g, '').replace(/^\.+/, '');
 }
 
-/** Parse ATOMS.md to extract total/completed counts from per-atom status lines.
- *  Returns null when ATOMS.md does not exist (distinct from 0/0). */
-function parseAtomCounts(sprintDir: string): { total: number; completed: number } | null {
-  const atomsPath = join(sprintDir, 'ATOMS.md');
-  try {
-    const raw = readFileSync(atomsPath, 'utf-8');
-    const statusLines = raw.match(/^- Status:\s*.+$/gm) || [];
-    const total = statusLines.length;
-    const statusCompleted = statusLines.filter(
-      (line) => /\bDONE\b/i.test(line) || /\bCOMPLETE\b/i.test(line) || line.includes('\u2705'),
-    ).length;
-    // Also count heading-level checkmarks (e.g., "### Atom 1: title ✅")
-    const headingCompleted = (raw.match(/^###\s+Atom\s+\d+:.+\u2705/gm) || []).length;
-    return { total, completed: Math.max(statusCompleted, headingCompleted) };
-  } catch {
-    return null;
-  }
-}
-
-/** Extract atom counts from STATE.json phase_history BUILD entry (fallback). */
-function atomCountsFromState(state: SprintState): { total: number; completed: number } | null {
-  const history = state.phase_history as Array<Record<string, unknown>>;
-  for (let i = history.length - 1; i >= 0; i--) {
-    const entry = history[i];
-    if (entry.phase === 'BUILD' && typeof entry.atoms_total === 'number') {
-      return {
-        total: entry.atoms_total as number,
-        completed: (entry.atoms_completed as number) ?? 0,
-      };
-    }
-  }
-  return null;
-}
-
-/** Resolve atom counts: ATOMS.md first, then STATE.json fallback. */
-function resolveAtomCounts(
-  sprintDir: string,
-  state: SprintState,
-): { total: number; completed: number; has_atoms: boolean } {
-  const fromFile = parseAtomCounts(sprintDir);
-  if (!fromFile) {
-    // No ATOMS.md — check STATE.json for historical counts
-    const fromState = atomCountsFromState(state);
-    return fromState
-      ? { ...fromState, has_atoms: false }
-      : { total: 0, completed: 0, has_atoms: false };
-  }
-
-  // ATOMS.md exists but shows 0 completed on a COMPLETE sprint — fall back to STATE.json
-  if (fromFile.completed === 0 && fromFile.total > 0 && state.phase === 'COMPLETE') {
-    const fromState = atomCountsFromState(state);
-    if (fromState && fromState.completed > 0) {
-      return { total: fromFile.total, completed: fromState.completed, has_atoms: true };
-    }
-  }
-
-  return { ...fromFile, has_atoms: true };
-}
+/* Atom parsing extracted to sprint-atoms.ts (shared with sprint-sse.ts) */
 
 /** Find a matching tmux session for a sprint from the cached background poller.
  *  Returns the session name if found, null otherwise. */
@@ -498,28 +443,27 @@ router.post('/sprints/:projectId/:featureId/transition', (req, res) => {
 
   const now = new Date().toISOString();
 
-  // Close current phase in history
-  const history = state.phase_history as Array<Record<string, unknown>>;
-  const currentEntry = history.find((e) => e.phase === state.phase && !e.exited);
-  if (currentEntry) {
-    currentEntry.exited = now;
-    if (summary && typeof summary === 'string') {
-      currentEntry.summary = summary.slice(0, 1000);
+  // Close current phase and open new phase — immutable update
+  const updatedHistory = (state.phase_history as Array<Record<string, unknown>>).map((e) => {
+    if (e.phase === state.phase && !e.exited) {
+      const closed: Record<string, unknown> = { ...e, exited: now };
+      if (summary && typeof summary === 'string') closed.summary = summary.slice(0, 1000);
+      return closed;
     }
-  }
+    return e;
+  });
+  updatedHistory.push({ phase: to_phase, entered: now });
 
-  // Open new phase
-  history.push({ phase: to_phase, entered: now });
-  state.phase = to_phase;
+  const updatedState: SprintState = { ...state, phase: to_phase, phase_history: updatedHistory };
 
   try {
-    writeSprintState(sprintDir, state);
+    writeSprintState(sprintDir, updatedState);
   } catch (err: any) {
     res.status(500).json({ error: `Failed to write STATE.json: ${err.message}` });
     return;
   }
 
-  res.json({ phase: to_phase, chain_status: deriveChainStatus(state) });
+  res.json({ phase: to_phase, chain_status: deriveChainStatus(updatedState) });
 });
 
 /** GET /api/retro — cross-project retrospective aggregation */

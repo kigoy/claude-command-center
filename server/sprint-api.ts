@@ -46,18 +46,18 @@ function sanitizeSegment(segment: string): string {
   return segment.replace(/[\/\\\.]+/g, '').replace(/^\.+/, '');
 }
 
-/** Parse ATOMS.md header to extract total/completed counts. */
+/** Parse ATOMS.md to extract total/completed counts from per-atom status lines. */
 function parseAtomCounts(sprintDir: string): { total: number; completed: number } {
   const atomsPath = join(sprintDir, 'ATOMS.md');
   try {
     const raw = readFileSync(atomsPath, 'utf-8');
-    // Look for "- Total: N" and "- Completed: N" in the status section
-    const totalMatch = raw.match(/- Total:\s*(\d+)/);
-    const completedMatch = raw.match(/- Completed:\s*(\d+)/);
-    return {
-      total: totalMatch ? parseInt(totalMatch[1], 10) : 0,
-      completed: completedMatch ? parseInt(completedMatch[1], 10) : 0,
-    };
+    // Count individual atom status lines rather than the (often stale) header counters
+    const statusLines = raw.match(/^- Status:\s*.+$/gm) || [];
+    const total = statusLines.length;
+    const completed = statusLines.filter(
+      (line) => /\bDONE\b/i.test(line) || line.includes('\u2705'),
+    ).length;
+    return { total, completed };
   } catch {
     return { total: 0, completed: 0 };
   }

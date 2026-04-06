@@ -1,151 +1,107 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-
-interface ChainStatus {
-  plan_done: boolean;
-  review_done: boolean;
-  qa_done: boolean;
-  qa_required: boolean;
-}
-
-interface SprintSummary {
-  feature: string;
-  phase: string;
-  blocked: boolean;
-  blocked_reason: string | null;
-  atoms_total: number;
-  atoms_completed: number;
-  has_atoms: boolean;
-  last_activity: string;
-  branch: string;
-  tmux_session: string;
-  tmux_active: boolean;
-  chain_status: ChainStatus;
-}
+import { PhaseStepper } from './PhaseStepper';
+import { SprintTimeline } from './SprintTimeline';
+import { SprintActions } from './SprintActions';
+import type { SprintSummary, SprintDetail, PhaseHistoryEntry, Phase } from '../types';
 
 interface Props {
   sprint: SprintSummary;
   projectId: string;
   projectPath: string;
-  onRefresh?: () => void;
 }
 
-const PHASE_COLORS: Record<string, string> = {
-  PLAN: '#9e9e9e',
-  BUILD: '#4caf50',
-  REVIEW: '#2196f3',
-  QA: '#ff9800',
-  SHIP: '#9c27b0',
-  COMPLETE: '#607d8b',
+const HEALTH_COLORS: Record<string, string> = {
+  on_track: '#4caf50',
+  stale: '#ff9800',
+  blocked: '#f44336',
+  waiting: '#9e9e9e',
+  complete: '#607d8b',
 };
 
-/** Phase action button config: label, command, and gate check. */
-function getPhaseAction(sprint: SprintSummary): {
-  label: string;
-  command: string | null;  // null = open terminal instead
-  disabled: boolean;
-  disabledReason: string;
-} | null {
-  const { phase, chain_status: cs } = sprint;
-  switch (phase) {
-    case 'PLAN':
-      return { label: 'Run Plan', command: '/office-hours', disabled: false, disabledReason: '' };
-    case 'BUILD':
-      return { label: 'Continue Build', command: null, disabled: false, disabledReason: '' };
-    case 'REVIEW':
-      return { label: 'Run /review', command: '/review', disabled: false, disabledReason: '' };
-    case 'QA':
-      if (!cs.review_done) {
-        return { label: 'Run /qa', command: '/qa', disabled: true, disabledReason: '/review must run first' };
-      }
-      return { label: 'Run /qa', command: '/qa', disabled: false, disabledReason: '' };
-    case 'SHIP':
-      if (!cs.review_done) {
-        return { label: 'Run /ship', command: '/ship', disabled: true, disabledReason: '/review must run first' };
-      }
-      if (cs.qa_required && !cs.qa_done) {
-        return { label: 'Run /ship', command: '/ship', disabled: true, disabledReason: '/qa required (has_ui=true)' };
-      }
-      return { label: 'Run /ship', command: '/ship', disabled: false, disabledReason: '' };
-    case 'COMPLETE':
-      return null;
-    default:
-      return null;
-  }
-}
-
-function ProgressBar({ completed, total }: { completed: number; total: number }) {
-  if (total === 0) return <span className="sprint-atoms-text">--</span>;
-  const pct = Math.round((completed / total) * 100);
-  const filled = Math.round((completed / total) * 10);
-  const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(10 - filled);
-  return (
-    <span className="sprint-atoms-text" title={`${pct}% complete`}>
-      {bar} {completed}/{total}
-    </span>
-  );
+function getHealth(sprint: SprintSummary): string {
+  if (sprint.phase === 'COMPLETE') return 'complete';
+  if (sprint.blocked) return 'blocked';
+  const hours = (Date.now() - new Date(sprint.last_activity).getTime()) / 3600000;
+  if (hours > 4) return 'stale';
+  return 'on_track';
 }
 
 function timeAgo(dateStr: string): string {
-  const now = Date.now();
-  const then = new Date(dateStr).getTime();
-  const diff = now - then;
-  if (isNaN(then)) return '';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  if (isNaN(diff)) return '';
   const mins = Math.floor(diff / 60000);
   if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
 }
 
-function nextAction(sprint: SprintSummary): string {
-  if (sprint.blocked) return `Blocked: ${sprint.blocked_reason || 'unknown'}`;
-  switch (sprint.phase) {
+function nextAction(s: SprintSummary): string {
+  if (s.blocked) return `Blocked: ${s.blocked_reason || 'unknown'}`;
+  switch (s.phase) {
     case 'PLAN': return 'Continue planning';
-    case 'BUILD':
-      if (!sprint.has_atoms) return 'Run /atomize to define atoms';
-      return `Continue atom ${sprint.atoms_completed + 1}`;
+    case 'BUILD': return s.atoms_total > 0
+      ? `Build atom ${s.atoms_completed + 1}/${s.atoms_total}`
+      : s.has_atoms ? 'Start building' : 'Run /atomize';
     case 'REVIEW': return 'Run /review';
     case 'QA': return 'Run /qa';
-    case 'SHIP': return 'Open PR';
+    case 'SHIP': return 'Ship it';
     case 'COMPLETE': return 'Done';
-    default: return sprint.phase;
+    default: return s.phase;
   }
 }
 
-/** Chain status badges showing which gates have been passed. */
-function ChainBadges({ status }: { status: ChainStatus }) {
-  const gates = [
-    { key: 'plan', done: status.plan_done, label: 'P' },
-    { key: 'review', done: status.review_done, label: 'R' },
-    { key: 'qa', done: status.qa_done, label: 'Q', required: status.qa_required },
-  ];
+/** Live counter showing time in current phase */
+function TimeInPhase({ since }: { since: string }) {
+  const [text, setText] = useState('');
 
-  const relevant = gates.filter((g) => g.done || g.required !== false);
-  if (relevant.length === 0) return null;
+  useEffect(() => {
+    function tick() {
+      const ms = Date.now() - new Date(since).getTime();
+      if (isNaN(ms) || ms < 0) { setText(''); return; }
+      const m = Math.floor(ms / 60000);
+      setText(m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`);
+    }
+    tick();
+    const id = setInterval(tick, 60000);
+    return () => clearInterval(id);
+  }, [since]);
 
+  return text ? <span className="time-in-phase">{text}</span> : null;
+}
+
+function PhaseDetailView({ entry }: { entry: PhaseHistoryEntry }) {
   return (
-    <span className="chain-badges">
-      {relevant.map((g) => (
-        <span
-          key={g.key}
-          className={`chain-badge ${g.done ? 'chain-badge--done' : 'chain-badge--pending'}`}
-          title={`${g.label === 'P' ? 'Plan' : g.label === 'R' ? 'Review' : 'QA'}: ${g.done ? 'done' : 'pending'}`}
-        >
-          {g.label}
-        </span>
-      ))}
-    </span>
+    <div className="phase-detail">
+      <strong>{entry.phase}</strong>
+      {entry.decisions?.map((d, i) => <p key={i} className="phase-detail-line">{d}</p>)}
+      {entry.e2e_gate && <p>E2E: {entry.e2e_gate}</p>}
+      {entry.qa_result && <p>QA: {entry.qa_result}</p>}
+      {entry.commit && <p>Commit: <code>{entry.commit}</code></p>}
+    </div>
   );
 }
 
-export function SprintCard({ sprint, projectId, projectPath, onRefresh }: Props) {
+export function SprintCard({ sprint, projectId, projectPath }: Props) {
   const navigate = useNavigate();
-  const [sending, setSending] = useState(false);
-  const [feedback, setFeedback] = useState('');
-  const color = PHASE_COLORS[sprint.phase] || '#9e9e9e';
-  const action = getPhaseAction(sprint);
+  const [expanded, setExpanded] = useState(false);
+  const [detail, setDetail] = useState<SprintDetail | null>(null);
+  const [pickedPhase, setPickedPhase] = useState<Phase | null>(null);
+
+  const health = getHealth(sprint);
+  const borderColor = HEALTH_COLORS[health];
+
+  const fetchDetail = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/sprints/${projectId}/${sprint.feature}/detail`);
+      if (res.ok) setDetail(await res.json());
+    } catch { /* ignore */ }
+  }, [projectId, sprint.feature]);
+
+  useEffect(() => {
+    if (expanded && !detail) fetchDetail();
+  }, [expanded, detail, fetchDetail]);
 
   function handleTerminal(e: React.MouseEvent) {
     e.stopPropagation();
@@ -161,89 +117,105 @@ export function SprintCard({ sprint, projectId, projectPath, onRefresh }: Props)
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
-      .then((res) => res.json())
-      .then((session) => navigate(`/session/${session.id}`))
+      .then((r) => r.json())
+      .then((s) => navigate(`/session/${s.id}`))
       .catch(console.error);
   }
 
-  async function handleAction(e: React.MouseEvent) {
-    e.stopPropagation();
-    if (!action || action.disabled || sending) return;
-
-    // BUILD phase → open terminal
-    if (action.command === null) {
-      handleTerminal(e);
-      return;
-    }
-
-    setSending(true);
-    setFeedback('');
-    try {
-      const res = await fetch(`/api/sprints/${projectId}/${sprint.feature}/exec`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: action.command }),
-      });
-      if (res.ok) {
-        setFeedback('Sent');
-        setTimeout(() => { setFeedback(''); onRefresh?.(); }, 2000);
-      } else {
-        const data = await res.json();
-        setFeedback(data.error || 'Failed');
-        setTimeout(() => setFeedback(''), 3000);
-      }
-    } catch {
-      setFeedback('Error');
-      setTimeout(() => setFeedback(''), 3000);
-    } finally {
-      setSending(false);
-    }
-  }
+  const historyForStepper = detail ? detail.phase_history : [];
+  const selectedEntry = pickedPhase && detail
+    ? detail.phase_history.find((e) => e.phase === pickedPhase)
+    : null;
 
   return (
-    <div className="sprint-card">
-      <div className="sprint-card-header">
-        <span className="sprint-phase-badge" style={{ backgroundColor: color }}>
-          {sprint.phase}
-        </span>
-        <h3 className="sprint-feature-name">{sprint.feature}</h3>
-        {sprint.blocked && <span className="sprint-blocked-badge">BLOCKED</span>}
-        <ChainBadges status={sprint.chain_status} />
-      </div>
+    <div
+      className={`sprint-card sprint-card--v2 sprint-card--${health}`}
+      style={{ borderLeftColor: borderColor }}
+      onClick={() => setExpanded(!expanded)}
+    >
+      {/* Phase stepper */}
+      <PhaseStepper
+        currentPhase={sprint.phase}
+        phaseHistory={historyForStepper}
+        onPhaseClick={(p) => setPickedPhase(pickedPhase === p ? null : p)}
+      />
 
-      <div className="sprint-card-body">
-        <div className="sprint-atoms-row">
-          <ProgressBar completed={sprint.atoms_completed} total={sprint.atoms_total} />
+      {/* Main row */}
+      <div className="sprint-card-row">
+        <div className="sprint-card-left">
+          <h3 className="sprint-feature-name" title={sprint.feature}>
+            {sprint.feature.replace(/^feat-/, '')}
+          </h3>
+          {sprint.blocked && <span className="sprint-blocked-badge">BLOCKED</span>}
+          {sprint.tmux_active && <span className="sprint-tmux-badge">LIVE</span>}
         </div>
-        <p className="sprint-next-action">{nextAction(sprint)}</p>
-        <p className="sprint-meta">
-          {timeAgo(sprint.last_activity)}
-          {sprint.branch !== 'main' && <span> on {sprint.branch}</span>}
-        </p>
+
+        <div className="sprint-card-center">
+          {sprint.has_atoms && sprint.atoms_total > 0 ? (
+            <div className="atom-bar">
+              <div className="atom-bar-track">
+                <div
+                  className="atom-bar-fill"
+                  style={{ width: `${Math.round((sprint.atoms_completed / sprint.atoms_total) * 100)}%` }}
+                />
+              </div>
+              <span className="atom-bar-label">{sprint.atoms_completed}/{sprint.atoms_total}</span>
+            </div>
+          ) : (
+            <span className="sprint-no-atoms">{!sprint.has_atoms && sprint.phase !== 'PLAN' ? 'No ATOMS.md' : '--'}</span>
+          )}
+          <p className="sprint-next-action">{nextAction(sprint)}</p>
+          {sprint.suggestions && sprint.suggestions.length > 0 && (
+            <div className="sprint-suggestions">
+              {sprint.suggestions.map((s) => (
+                <span key={s} className="suggestion-pill">{s}</span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="sprint-card-right">
+          <div className="sprint-phase-pill">{sprint.phase}</div>
+          <TimeInPhase since={sprint.last_activity} />
+          <span className="sprint-time-ago">{timeAgo(sprint.last_activity)}</span>
+        </div>
+
+        <div className="sprint-card-actions" onClick={(e) => e.stopPropagation()}>
+          <button
+            className={`terminal-btn${sprint.tmux_active ? ' terminal-btn--live' : ''}`}
+            onClick={handleTerminal}
+          >
+            {sprint.tmux_active ? '● Terminal' : '▶ Terminal'}
+          </button>
+          <SprintActions
+            projectId={projectId}
+            feature={sprint.feature}
+            projectPath={projectPath}
+            branch={sprint.branch}
+            tmuxSession={sprint.tmux_session}
+          />
+        </div>
       </div>
 
-      <div className="sprint-card-actions">
-        {feedback && <span className="sprint-feedback">{feedback}</span>}
-        {action && (
-          <button
-            className={`action-btn${action.disabled ? ' action-btn--disabled' : ''}`}
-            onClick={handleAction}
-            disabled={action.disabled || sending}
-            title={action.disabled ? action.disabledReason : action.label}
-          >
-            {sending ? '...' : action.label}
-          </button>
-        )}
-        {sprint.phase !== 'COMPLETE' && (
-          <button
-            className={`terminal-btn${sprint.tmux_active ? ' terminal-btn--active' : ''}`}
-            onClick={handleTerminal}
-            title={sprint.tmux_active ? `Attach to ${sprint.tmux_session}` : 'Open terminal'}
-          >
-            Terminal
-          </button>
-        )}
-      </div>
+      {/* Phase detail popup */}
+      {selectedEntry && (
+        <div className="phase-detail-panel" onClick={(e) => e.stopPropagation()}>
+          <PhaseDetailView entry={selectedEntry} />
+        </div>
+      )}
+
+      {/* Expanded: timeline + learnings */}
+      {expanded && detail && (
+        <div className="sprint-expanded" onClick={(e) => e.stopPropagation()}>
+          <SprintTimeline history={detail.phase_history} />
+          {detail.learnings && detail.learnings.length > 0 && (
+            <div className="sprint-learnings">
+              <h4>Learnings</h4>
+              <ul>{detail.learnings.map((l, i) => <li key={i}>{l}</li>)}</ul>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

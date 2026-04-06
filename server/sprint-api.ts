@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { readdirSync, readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
+import { readdirSync, readFileSync, existsSync, mkdirSync, writeFileSync, statSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
 import { getProjects, getGroups } from './sprint-config.js';
@@ -104,8 +104,8 @@ function resolveAtomCounts(
       : { total: 0, completed: 0, has_atoms: false };
   }
 
-  // ATOMS.md exists but shows 0 completed — fall back to STATE.json if available
-  if (fromFile.completed === 0 && fromFile.total > 0) {
+  // ATOMS.md exists but shows 0 completed on a COMPLETE sprint — fall back to STATE.json
+  if (fromFile.completed === 0 && fromFile.total > 0 && state.phase === 'COMPLETE') {
     const fromState = atomCountsFromState(state);
     if (fromState && fromState.completed > 0) {
       return { total: fromFile.total, completed: fromState.completed, has_atoms: true };
@@ -297,7 +297,7 @@ router.post('/sprints', (req, res) => {
     branch: 'main',
     created: now,
     phase: 'PLAN',
-    phase_history: [{ entered: now }],
+    phase_history: [{ phase: 'PLAN', entered: now }],
     qa_routing: {},
     blocked: false,
     blocked_reason: null,
@@ -390,17 +390,12 @@ const ALLOWED_COMMANDS = new Set([
   '/freeze', '/guard', '/unfreeze', '/benchmark', '/canary',
 ]);
 
-/** Validate a command is safe to send to tmux. */
+/** Validate a command is safe to send to tmux — whitelist only. */
 function isCommandSafe(command: string): boolean {
   const trimmed = command.trim();
-  // Allow whitelisted slash commands
   if (ALLOWED_COMMANDS.has(trimmed)) return true;
-  // Allow /sprint subcommands
   if (/^\/sprint\s+(new|switch|status|close|retro)\b/.test(trimmed)) return true;
-  // Reject anything with shell metacharacters
-  if (/[;&|`$(){}[\]<>!#]/.test(trimmed)) return false;
-  // Allow simple text (for prompts/responses)
-  return trimmed.length > 0 && trimmed.length < 500;
+  return false;
 }
 
 /** POST /api/sprints/:projectId/:featureId/exec — send command to sprint tmux session */
@@ -508,7 +503,9 @@ router.post('/sprints/:projectId/:featureId/transition', (req, res) => {
   const currentEntry = history.find((e) => e.phase === state.phase && !e.exited);
   if (currentEntry) {
     currentEntry.exited = now;
-    if (summary) currentEntry.summary = summary;
+    if (summary && typeof summary === 'string') {
+      currentEntry.summary = summary.slice(0, 1000);
+    }
   }
 
   // Open new phase
@@ -557,7 +554,7 @@ router.get('/briefing', (_req, res) => {
   // Sync report if updated in last 24h
   let syncReport: string | null = null;
   try {
-    const stat = require('fs').statSync(diffReportPath);
+    const stat = statSync(diffReportPath);
     const ageHours = (Date.now() - stat.mtimeMs) / (1000 * 60 * 60);
     if (ageHours < 24) {
       syncReport = readFileSync(diffReportPath, 'utf-8');
@@ -601,7 +598,6 @@ router.post('/skills/new/dismiss', (_req, res) => {
   const GSTACK_ROOT = process.env.GSTACK_ROOT || '/Volumes/Extreme Pro/.gstack';
   const newSkillsPath = join(GSTACK_ROOT, 'sync', 'new-skills.json');
   try {
-    const { unlinkSync } = require('fs');
     unlinkSync(newSkillsPath);
   } catch {
     // File may not exist — that's fine

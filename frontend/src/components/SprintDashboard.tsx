@@ -1,53 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ProjectGroup } from './ProjectGroup';
+import { GroupSection } from './GroupSection';
 import { NewSprintDialog } from './NewSprintDialog';
-
-interface ChainStatus {
-  plan_done: boolean;
-  review_done: boolean;
-  qa_done: boolean;
-  qa_required: boolean;
-}
-
-interface SprintSummary {
-  feature: string;
-  phase: string;
-  blocked: boolean;
-  blocked_reason: string | null;
-  atoms_total: number;
-  atoms_completed: number;
-  has_atoms: boolean;
-  last_activity: string;
-  branch: string;
-  tmux_session: string;
-  tmux_active: boolean;
-  chain_status: ChainStatus;
-}
-
-interface ProjectSummary {
-  id: string;
-  path: string;
-  stack: string;
-  has_deploy: boolean;
-  deploy_url?: string;
-  sprints: SprintSummary[];
-}
-
-interface Recommendation {
-  text: string;
-  project: string;
-  feature: string;
-  phase: string;
-  effort_minutes: number;
-  score: number;
-}
-
-interface DashboardData {
-  projects: ProjectSummary[];
-  recommendation: string;
-  recommendations?: Recommendation[];
-}
+import { AnalyticsTab } from './AnalyticsTab';
+import { useSprintSSE } from '../hooks/use-sprint-sse';
+import type { DashboardData } from '../types';
 
 export function SprintDashboard() {
   const navigate = useNavigate();
@@ -55,6 +12,17 @@ export function SprintDashboard() {
   const [offline, setOffline] = useState(false);
   const failCount = useRef(0);
   const [newSprintProject, setNewSprintProject] = useState<string | null>(null);
+  const [tab, setTab] = useState<'sprints' | 'analytics'>('sprints');
+  const [newSkills, setNewSkills] = useState<Array<{ skill: string }>>([]);
+
+  useEffect(() => {
+    fetch('/api/skills/new').then((r) => r.json()).then(setNewSkills).catch(() => {});
+  }, []);
+
+  const dismissNewSkills = useCallback(() => {
+    fetch('/api/skills/new/dismiss', { method: 'POST' }).catch(() => {});
+    setNewSkills([]);
+  }, []);
 
   const fetchDashboard = useCallback(async () => {
     try {
@@ -75,7 +43,8 @@ export function SprintDashboard() {
 
   useEffect(() => {
     fetchDashboard();
-    const id = setInterval(fetchDashboard, 30_000);
+    // Slower poll since SSE handles real-time — this is a safety net
+    const id = setInterval(fetchDashboard, 60_000);
     const onOnline = () => fetchDashboard();
     const onVisible = () => { if (document.visibilityState === 'visible') fetchDashboard(); };
     window.addEventListener('online', onOnline);
@@ -87,19 +56,75 @@ export function SprintDashboard() {
     };
   }, [fetchDashboard]);
 
+  // Live SSE updates — merge into current data
+  useSprintSSE(useCallback((event) => {
+    setData((prev) => {
+      if (!prev) return prev;
+      const projects = prev.projects.map((p) => {
+        if (p.id !== event.projectId) return p;
+        const sprints = p.sprints.map((s) =>
+          s.feature === event.feature ? { ...s, ...event.sprint } : s,
+        );
+        // If sprint not found, add it
+        const exists = sprints.some((s) => s.feature === event.feature);
+        return { ...p, sprints: exists ? sprints : [...sprints, event.sprint] };
+      });
+      return { ...prev, projects };
+    });
+  }, []));
+
   const totalSprints = data?.projects.reduce((n, p) => n + p.sprints.length, 0) ?? 0;
+  const totalActive = data?.projects.reduce(
+    (n, p) => n + p.sprints.filter((s) => s.phase !== 'COMPLETE').length, 0,
+  ) ?? 0;
+  const totalBlocked = data?.projects.reduce(
+    (n, p) => n + p.sprints.filter((s) => s.blocked).length, 0,
+  ) ?? 0;
+
+  // Separate grouped and ungrouped projects
+  const groups = data?.groups ?? [];
+  const groupedProjectIds = new Set(groups.flatMap((g) => g.projects));
+  const ungrouped = data?.projects.filter((p) => !groupedProjectIds.has(p.id)) ?? [];
 
   return (
-    <div className="dashboard">
-      {offline && (
-        <div className="offline-banner">Connection lost — retrying...</div>
+    <div className="dashboard dashboard--v2">
+      {offline && <div className="offline-banner">Connection lost — retrying...</div>}
+
+      {newSkills.length > 0 && (
+        <div className="new-skills-banner">
+          <span>New skills available: {newSkills.map((s) => `/${s.skill}`).join(', ')}</span>
+          <button className="new-skills-dismiss" onClick={dismissNewSkills}>Dismiss</button>
+        </div>
       )}
 
       <header className="dashboard-header">
-        <h1>SPRINT COMMAND</h1>
-        <button onClick={() => navigate('/sessions')}>Sessions</button>
+        <div className="dashboard-title">
+          <h1>SPRINT COMMAND</h1>
+          {data && (
+            <span className="dashboard-stats">
+              {totalActive} active
+              {totalBlocked > 0 && <span className="stats-blocked"> · {totalBlocked} blocked</span>}
+              {' · '}{totalSprints} total
+            </span>
+          )}
+        </div>
+        <div className="dashboard-tabs">
+          <button
+            className={`dashboard-tab${tab === 'sprints' ? ' dashboard-tab--active' : ''}`}
+            onClick={() => setTab('sprints')}
+          >Sprints</button>
+          <button
+            className={`dashboard-tab${tab === 'analytics' ? ' dashboard-tab--active' : ''}`}
+            onClick={() => setTab('analytics')}
+          >Analytics</button>
+        </div>
+        <button className="sessions-btn" onClick={() => navigate('/sessions')}>Sessions</button>
       </header>
 
+      {tab === 'analytics' ? (
+        <AnalyticsTab />
+      ) : (
+      <>
       {!data && <p className="empty">Loading...</p>}
 
       {data && totalSprints === 0 && (
@@ -108,32 +133,42 @@ export function SprintDashboard() {
         </p>
       )}
 
-      {data?.projects.map((project) => (
-        <ProjectGroup
-          key={project.id}
-          project={project}
+      {/* Grouped projects */}
+      {groups.map((group) => (
+        <GroupSection
+          key={group.id}
+          group={group}
+          projects={data?.projects ?? []}
           onNewSprint={(id) => setNewSprintProject(id)}
-          onRefresh={fetchDashboard}
         />
       ))}
 
-      {data?.recommendations && data.recommendations.length > 0 ? (
+      {/* Ungrouped projects under OTHER */}
+      {ungrouped.length > 0 && ungrouped.some((p) => p.sprints.length > 0) && (
+        <GroupSection
+          group={{ id: '_other', label: 'OTHER', projects: ungrouped.map((p) => p.id) }}
+          projects={ungrouped}
+          onNewSprint={(id) => setNewSprintProject(id)}
+        />
+      )}
+
+      {/* Recommendation bar */}
+      {data?.recommendations && data.recommendations.length > 0 && (
         <div className="recommendation-bar">
-          <strong>RECOMMEND:</strong>
-          <ol className="recommendation-list">
+          <strong>NEXT UP</strong>
+          <div className="recommendation-list">
             {data.recommendations.map((r, i) => (
-              <li key={i} className="recommendation-item">
+              <div key={i} className="recommendation-item">
+                <span className="recommendation-rank">{i + 1}</span>
                 <span className="recommendation-text">{r.text}</span>
-                <span className="recommendation-effort">~{r.effort_minutes}min</span>
-              </li>
+              </div>
             ))}
-          </ol>
+          </div>
         </div>
-      ) : data?.recommendation ? (
-        <div className="recommendation-bar">
-          <strong>RECOMMEND:</strong> {data.recommendation}
-        </div>
-      ) : null}
+      )}
+      </>
+      )}
+
       {newSprintProject !== null && data && (
         <NewSprintDialog
           projects={data.projects.map((p) => ({ id: p.id, path: p.path, stack: p.stack }))}

@@ -69,20 +69,19 @@ function parseAtomCounts(sprintDir: string): { total: number; completed: number 
 }
 
 /** Check if BUILD->REVIEW transition exists in phase_history */
-function isChainCompliant(phaseHistory: unknown[]): boolean {
+function isChainCompliant(phaseHistory: unknown[], isComplete: boolean): boolean {
   const entries = phaseHistory as PhaseEntry[];
   const phases = entries.map((e) => e.phase).filter(Boolean);
 
-  // Chain compliant = BUILD followed by REVIEW at some point
   const buildIdx = phases.indexOf('BUILD');
   const reviewIdx = phases.indexOf('REVIEW');
 
-  // If sprint never reached BUILD, chain compliance is N/A (count as compliant)
+  // Never reached BUILD = N/A, count as compliant
   if (buildIdx === -1) return true;
-  // If sprint reached BUILD but not REVIEW, it's either still in BUILD (ok) or skipped (not ok)
+  // Reached BUILD but no REVIEW
   if (reviewIdx === -1) {
-    // Still in BUILD = hasn't had the chance yet, count as compliant
-    return true;
+    // COMPLETE without REVIEW = skipped the mandatory gate
+    return !isComplete;
   }
   // REVIEW must come after BUILD
   return reviewIdx > buildIdx;
@@ -163,7 +162,7 @@ export function buildRetroSummary(): RetroSummary {
         const atoms = parseAtomCounts(featureDir);
         const isComplete = state.phase === 'COMPLETE';
         const elapsed = hoursToComplete(state.created, state.phase_history);
-        const compliant = isChainCompliant(state.phase_history);
+        const compliant = isChainCompliant(state.phase_history, isComplete);
 
         const metrics: SprintMetrics = {
           feature: state.feature,

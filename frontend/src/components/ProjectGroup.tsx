@@ -1,50 +1,18 @@
 import { useState } from 'react';
 import { SprintCard } from './SprintCard';
-
-interface ChainStatus {
-  plan_done: boolean;
-  review_done: boolean;
-  qa_done: boolean;
-  qa_required: boolean;
-}
-
-interface SprintSummary {
-  feature: string;
-  phase: string;
-  blocked: boolean;
-  blocked_reason: string | null;
-  atoms_total: number;
-  atoms_completed: number;
-  has_atoms: boolean;
-  last_activity: string;
-  branch: string;
-  tmux_session: string;
-  tmux_active: boolean;
-  chain_status: ChainStatus;
-}
-
-interface ProjectSummary {
-  id: string;
-  path: string;
-  stack: string;
-  has_deploy: boolean;
-  deploy_url?: string;
-  sprints: SprintSummary[];
-}
+import type { ProjectSummary } from '../types';
 
 interface Props {
   project: ProjectSummary;
   onNewSprint: (projectId: string) => void;
-  onRefresh: () => void;
 }
 
-export function ProjectGroup({ project, onNewSprint, onRefresh }: Props) {
+export function ProjectGroup({ project, onNewSprint }: Props) {
   const [showCompleted, setShowCompleted] = useState(false);
 
   const active = project.sprints
     .filter((s) => s.phase !== 'COMPLETE')
     .sort((a, b) => {
-      // Blocked first, then by last_activity (most recent first)
       if (a.blocked && !b.blocked) return -1;
       if (!a.blocked && b.blocked) return 1;
       return new Date(b.last_activity).getTime() - new Date(a.last_activity).getTime();
@@ -52,19 +20,21 @@ export function ProjectGroup({ project, onNewSprint, onRefresh }: Props) {
 
   const completed = project.sprints
     .filter((s) => s.phase === 'COMPLETE')
-    .sort((a, b) =>
-      new Date(b.last_activity).getTime() - new Date(a.last_activity).getTime(),
-    );
+    .sort((a, b) => new Date(b.last_activity).getTime() - new Date(a.last_activity).getTime());
+
+  const blockedCount = active.filter((s) => s.blocked).length;
 
   return (
     <div className="project-group">
       <div className="project-group-header">
         <h2>{project.id.toUpperCase()}</h2>
         <span className="project-stack">{project.stack}</span>
-        <button
-          className="new-sprint-btn"
-          onClick={() => onNewSprint(project.id)}
-        >
+        <span className="project-sprint-count">
+          {active.length} active
+          {blockedCount > 0 && <span className="project-blocked-count">, {blockedCount} blocked</span>}
+          {completed.length > 0 && `, ${completed.length} done`}
+        </span>
+        <button className="new-sprint-btn" onClick={() => onNewSprint(project.id)}>
           + Sprint
         </button>
       </div>
@@ -81,7 +51,6 @@ export function ProjectGroup({ project, onNewSprint, onRefresh }: Props) {
               sprint={sprint}
               projectId={project.id}
               projectPath={project.path}
-              onRefresh={onRefresh}
             />
           ))}
         </div>
@@ -93,7 +62,7 @@ export function ProjectGroup({ project, onNewSprint, onRefresh }: Props) {
             className="completed-toggle"
             onClick={() => setShowCompleted(!showCompleted)}
           >
-            {showCompleted ? '▾' : '▸'} Completed ({completed.length})
+            {showCompleted ? '▾' : '▸'} {completed.length} completed
           </button>
           {showCompleted && (
             <div className="sprint-list sprint-list--completed">

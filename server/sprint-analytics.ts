@@ -59,13 +59,13 @@ function avg(nums: number[]): number | null {
 }
 
 /** Check BUILD->REVIEW chain compliance from phase_history */
-function hasChainCompliance(phaseHistory: unknown[]): boolean {
+function hasChainCompliance(phaseHistory: unknown[], isComplete: boolean): boolean {
   const entries = phaseHistory as PhaseEntry[];
   const phases = entries.map((e) => e.phase).filter(Boolean);
   const buildIdx = phases.indexOf('BUILD');
   const reviewIdx = phases.indexOf('REVIEW');
   if (buildIdx === -1) return true; // never reached BUILD
-  if (reviewIdx === -1) return true; // still in BUILD
+  if (reviewIdx === -1) return !isComplete; // COMPLETE without REVIEW = non-compliant
   return reviewIdx > buildIdx;
 }
 
@@ -170,7 +170,7 @@ export function buildAnalytics(): AnalyticsSummary {
         }
 
         // Chain compliance
-        const compliant = hasChainCompliance(state.phase_history);
+        const compliant = hasChainCompliance(state.phase_history, state.phase === 'COMPLETE');
         projectRelevant++;
         totalRelevant++;
         if (compliant) {

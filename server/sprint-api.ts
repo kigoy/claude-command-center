@@ -652,7 +652,7 @@ router.post('/explore-idea', (req, res) => {
       try {
         execFileSync('tmux', ['new-session', '-d', '-s', sessionName, '-c', project.path], { stdio: 'ignore' });
         if (description) {
-          const prompt = `/office-hours ${description.slice(0, 200)}`;
+          const prompt = `Read /Volumes/Extreme Pro/.gstack/skills/office-hours/SKILL.md and run office-hours on this idea: ${description.slice(0, 200)}`;
           execFileSync('tmux', ['send-keys', '-t', sessionName, '-l', 'claude']);
           execFileSync('tmux', ['send-keys', '-t', sessionName, 'Enter']);
           setTimeout(() => {
@@ -681,7 +681,16 @@ router.post('/explore-idea', (req, res) => {
   try {
     mkdirSync(projectPath, { recursive: true });
 
-    const claudeMd = `# ${slug}\n\n${description || 'New exploration project.'}\n\n## Status\n\nExploration phase.\n`;
+    // Write CLAUDE.md from template (includes orchestrator + skills references)
+    const GSTACK_ROOT = process.env.GSTACK_ROOT || '/Volumes/Extreme Pro/.gstack';
+    const tmplPath = join(GSTACK_ROOT, 'templates', 'CLAUDE.md.tmpl');
+    let claudeMd: string;
+    try {
+      claudeMd = readFileSync(tmplPath, 'utf-8');
+    } catch {
+      // Fallback if template missing
+      claudeMd = `# ${slug}\n\n## Workflow\n\nSprint Command is the development workflow engine.\n- Orchestrator: /Volumes/Extreme Pro/.gstack/orchestrator.md\n- Skills: /Volumes/Extreme Pro/.gstack/skills/\n\n## Post-Task\n\nCreate FOR_YOCHAI.md after significant work. Coffee-chat tone.\n`;
+    }
     writeFileSync(join(projectPath, 'CLAUDE.md'), claudeMd);
 
     const sprintDir = join(projectPath, '.sprints', 'feat-exploration');
@@ -705,7 +714,7 @@ router.post('/explore-idea', (req, res) => {
     try {
       execFileSync('tmux', ['new-session', '-d', '-s', sessionName, '-c', projectPath], { stdio: 'ignore' });
       if (description) {
-        const prompt = `/office-hours ${description.slice(0, 200)}`;
+        const prompt = `Read /Volumes/Extreme Pro/.gstack/skills/office-hours/SKILL.md and run office-hours on this idea: ${description.slice(0, 200)}`;
         execFileSync('tmux', ['send-keys', '-t', sessionName, '-l', 'claude']);
         execFileSync('tmux', ['send-keys', '-t', sessionName, 'Enter']);
         setTimeout(() => {

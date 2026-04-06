@@ -498,6 +498,20 @@ textarea:focus {
   color: var(--text-dim);
 }
 
+.new-sprint-btn {
+  margin-left: auto;
+  font-size: 0.7rem;
+  padding: 0.2rem 0.6rem;
+  background: var(--border);
+  color: var(--text-dim);
+  border-radius: 4px;
+}
+
+.new-sprint-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
 .project-empty {
   font-size: 0.8rem;
   color: var(--text-dim);

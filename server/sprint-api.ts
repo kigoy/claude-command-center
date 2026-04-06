@@ -1,6 +1,7 @@
 import { Router } from 'express';
-import { readdirSync, readFileSync, existsSync } from 'fs';
+import { readdirSync, readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { execFileSync } from 'child_process';
 import { getProjects } from './sprint-config.js';
 import { readSprintState, type SprintState } from './sprint-state.js';
 
@@ -161,6 +162,67 @@ router.get('/sprints/:projectId/:featureId/atoms', (req, res) => {
   } catch {
     res.status(404).json({ error: `ATOMS.md not found for '${req.params.featureId}'` });
   }
+});
+
+/** POST /api/sprints — create a new sprint directory + STATE.json, open tmux session */
+router.post('/sprints', (req, res) => {
+  const { projectId, featureName } = req.body;
+  if (!projectId || !featureName) {
+    res.status(400).json({ error: 'projectId and featureName are required' });
+    return;
+  }
+
+  const project = getProjects().find((p) => p.id === projectId);
+  if (!project) {
+    res.status(404).json({ error: `Project '${projectId}' not found` });
+    return;
+  }
+
+  const safeName = sanitizeSegment(featureName);
+  if (!safeName) {
+    res.status(400).json({ error: 'Invalid feature name' });
+    return;
+  }
+
+  const dirName = `feat-${safeName}`;
+  const sprintDir = join(project.path, '.sprints', dirName);
+
+  if (existsSync(sprintDir)) {
+    res.status(409).json({ error: `Sprint '${dirName}' already exists` });
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const state: SprintState = {
+    feature: dirName,
+    branch: 'main',
+    created: now,
+    phase: 'PLAN',
+    phase_history: [{ entered: now }],
+    qa_routing: {},
+    blocked: false,
+    blocked_reason: null,
+  };
+
+  try {
+    mkdirSync(sprintDir, { recursive: true });
+    writeFileSync(join(sprintDir, 'STATE.json'), JSON.stringify(state, null, 2) + '\n');
+  } catch (err: any) {
+    res.status(500).json({ error: `Failed to create sprint directory: ${err.message}` });
+    return;
+  }
+
+  // Open a new tmux session in the project directory
+  const sessionName = `${projectId}-${safeName}`;
+  try {
+    execFileSync('tmux', ['new-session', '-d', '-s', sessionName, '-c', project.path], {
+      stdio: 'ignore',
+    });
+  } catch {
+    // tmux may not be available or session name may conflict — non-fatal
+  }
+
+  res.status(201).json({ feature: dirName, project: projectId, session: sessionName });
 });
 
 /** GET /api/dashboard — combined view: all projects, all sprints, recommendation */

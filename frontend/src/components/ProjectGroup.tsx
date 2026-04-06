@@ -24,7 +24,12 @@ const PHASE_ORDER: Record<string, number> = {
   BUILD: 1, REVIEW: 2, QA: 3, SHIP: 4, PLAN: 5, COMPLETE: 99,
 };
 
-export function ProjectGroup({ project }: { project: ProjectSummary }) {
+interface Props {
+  project: ProjectSummary;
+  onNewSprint: (projectId: string) => void;
+}
+
+export function ProjectGroup({ project, onNewSprint }: Props) {
   const sorted = [...project.sprints].sort((a, b) => {
     // Blocked first, then by phase priority
     if (a.blocked && !b.blocked) return -1;
@@ -37,6 +42,12 @@ export function ProjectGroup({ project }: { project: ProjectSummary }) {
       <div className="project-group-header">
         <h2>{project.id.toUpperCase()}</h2>
         <span className="project-stack">{project.stack}</span>
+        <button
+          className="new-sprint-btn"
+          onClick={() => onNewSprint(project.id)}
+        >
+          + Sprint
+        </button>
       </div>
       {sorted.length === 0 ? (
         <p className="project-empty">No active sprints</p>

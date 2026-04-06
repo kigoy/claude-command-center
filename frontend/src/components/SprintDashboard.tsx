@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ProjectGroup } from './ProjectGroup';
+import { NewSprintDialog } from './NewSprintDialog';
 
 interface SprintSummary {
   feature: string;
@@ -32,6 +33,7 @@ export function SprintDashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [offline, setOffline] = useState(false);
   const failCount = useRef(0);
+  const [newSprintProject, setNewSprintProject] = useState<string | null>(null);
 
   const fetchDashboard = useCallback(async () => {
     try {
@@ -86,13 +88,25 @@ export function SprintDashboard() {
       )}
 
       {data?.projects.map((project) => (
-        <ProjectGroup key={project.id} project={project} />
+        <ProjectGroup
+          key={project.id}
+          project={project}
+          onNewSprint={(id) => setNewSprintProject(id)}
+        />
       ))}
 
       {data?.recommendation && (
         <div className="recommendation-bar">
           <strong>RECOMMEND:</strong> {data.recommendation}
         </div>
+      )}
+      {newSprintProject !== null && data && (
+        <NewSprintDialog
+          projects={data.projects.map((p) => ({ id: p.id, path: p.path, stack: p.stack }))}
+          defaultProjectId={newSprintProject}
+          onClose={() => setNewSprintProject(null)}
+          onCreated={() => { setNewSprintProject(null); fetchDashboard(); }}
+        />
       )}
     </div>
   );

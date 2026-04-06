@@ -52,3 +52,9 @@ Web-based command center for managing Claude Code CLI sessions via tmux. Two sep
 - Write minimal, clean code. This project is open source — others will read and contribute to it.
 - No machine-specific paths or configuration. Everything must be generic and portable.
 - Keep files short and focused. Prefer clarity over cleverness.
+
+## Common Errors to Avoid
+
+- After modifying `server/` files, restart the server process — `npm run build` only rebuilds frontend static assets, not the running Express/tsx process
+- `sessions.ts` reuses existing running sessions by name before creating new ones — never create duplicate `cc-*` tmux sessions for the same sprint
+- Production mode: Express on `:3100` serves `frontend/dist`. Changes need `npm run build` + server restart. Vite dev server (`:5173`) is not used in production

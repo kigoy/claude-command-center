@@ -142,6 +142,17 @@ export function addProject(
   reload();
 }
 
+/** Update a project's path in config.yaml and reload. */
+export function updateProjectPath(id: string, newPath: string): void {
+  const config = loadConfig();
+  if (!config) throw new Error('Could not load config.yaml');
+  if (!config.projects[id]) throw new Error(`Project '${id}' not found`);
+  config.projects[id].path = newPath;
+  config.updated = new Date().toISOString().slice(0, 10);
+  writeFileSync(CONFIG_PATH, yaml.dump(config, { lineWidth: -1, noRefs: true }));
+  reload();
+}
+
 // Initial load
 reload();
 

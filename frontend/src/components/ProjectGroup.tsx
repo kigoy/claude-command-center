@@ -1,15 +1,18 @@
 import { useState } from 'react';
 import { SprintCard } from './SprintCard';
+import { LinkFolderDialog } from './LinkFolderDialog';
 import type { ProjectSummary } from '../types';
 
 interface Props {
   project: ProjectSummary;
   onNewSprint: (projectId: string) => void;
   onOpenTerminal?: (name: string, cwd: string, tmuxSession?: string) => void;
+  onProjectLinked?: () => void;
 }
 
-export function ProjectGroup({ project, onNewSprint, onOpenTerminal }: Props) {
+export function ProjectGroup({ project, onNewSprint, onOpenTerminal, onProjectLinked }: Props) {
   const [showCompleted, setShowCompleted] = useState(false);
+  const [showLink, setShowLink] = useState(false);
 
   const active = project.sprints
     .filter((s) => s.phase !== 'COMPLETE')
@@ -24,27 +27,42 @@ export function ProjectGroup({ project, onNewSprint, onOpenTerminal }: Props) {
     .sort((a, b) => new Date(b.last_activity).getTime() - new Date(a.last_activity).getTime());
 
   const blockedCount = active.filter((s) => s.blocked).length;
+  const linked = project.path_exists !== false; // default true for backwards compat
 
   return (
-    <div className="project-group">
+    <div className={`project-group${!linked ? ' project-group--unlinked' : ''}`}>
       <div className="project-group-header">
         <h2>{project.id.toUpperCase()}</h2>
         <span className="project-stack">{project.stack}</span>
-        <span className="project-sprint-count">
-          {active.length} active
-          {blockedCount > 0 && <span className="project-blocked-count">, {blockedCount} blocked</span>}
-          {completed.length > 0 && `, ${completed.length} done`}
-        </span>
-        <button className="new-sprint-btn" onClick={() => onNewSprint(project.id)}>
-          + Sprint
-        </button>
+        {linked ? (
+          <>
+            <span className="project-sprint-count">
+              {active.length} active
+              {blockedCount > 0 && <span className="project-blocked-count">, {blockedCount} blocked</span>}
+              {completed.length > 0 && `, ${completed.length} done`}
+            </span>
+            <button className="new-sprint-btn" onClick={() => onNewSprint(project.id)}>
+              + Sprint
+            </button>
+          </>
+        ) : (
+          <button className="link-folder-btn" onClick={() => setShowLink(true)}>
+            Link folder
+          </button>
+        )}
       </div>
 
-      {active.length === 0 && completed.length === 0 && (
+      {!linked && (
+        <p className="project-empty project-unlinked-hint">
+          No folder linked — click "Link folder" to associate a directory
+        </p>
+      )}
+
+      {linked && active.length === 0 && completed.length === 0 && (
         <p className="project-empty">No sprints</p>
       )}
 
-      {active.length > 0 && (
+      {linked && active.length > 0 && (
         <div className="sprint-list">
           {active.map((sprint) => (
             <SprintCard
@@ -58,7 +76,7 @@ export function ProjectGroup({ project, onNewSprint, onOpenTerminal }: Props) {
         </div>
       )}
 
-      {completed.length > 0 && (
+      {linked && completed.length > 0 && (
         <div className="completed-section">
           <button
             className="completed-toggle"
@@ -79,6 +97,15 @@ export function ProjectGroup({ project, onNewSprint, onOpenTerminal }: Props) {
             </div>
           )}
         </div>
+      )}
+
+      {showLink && (
+        <LinkFolderDialog
+          projectId={project.id}
+          currentPath={project.path}
+          onClose={() => setShowLink(false)}
+          onLinked={() => { setShowLink(false); onProjectLinked?.(); }}
+        />
       )}
     </div>
   );

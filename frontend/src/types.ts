@@ -29,6 +29,7 @@ export interface ProjectSummary {
   stack: string;
   has_deploy: boolean;
   deploy_url?: string;
+  path_exists: boolean;
   sprints: SprintSummary[];
 }
 

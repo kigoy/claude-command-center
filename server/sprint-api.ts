@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { readdirSync, readFileSync, existsSync, mkdirSync, writeFileSync, statSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
-import { getProjects, getGroups, addProject } from './sprint-config.js';
+import { getProjects, getGroups, addProject, updateProjectPath } from './sprint-config.js';
 import { readSprintState, writeSprintState, deriveChainStatus, type SprintState, type ChainStatus } from './sprint-state.js';
 import { resolveAtomCounts } from './sprint-atoms.js';
 import { rankRecommendations, type SprintContext } from './sprint-recommendations.js';
@@ -47,6 +47,7 @@ interface ProjectSummary {
   stack: string;
   has_deploy: boolean;
   deploy_url?: string;
+  path_exists: boolean;
   sprints: SprintSummary[];
 }
 
@@ -148,7 +149,8 @@ function buildProjectSummaries(): ProjectSummary[] {
     stack: p.stack,
     has_deploy: p.has_deploy,
     deploy_url: p.deploy_url,
-    sprints: listSprintsForProject(p.id, p.path),
+    path_exists: existsSync(p.path),
+    sprints: existsSync(p.path) ? listSprintsForProject(p.id, p.path) : [],
   }));
 }
 
@@ -157,6 +159,37 @@ function buildProjectSummaries(): ProjectSummary[] {
 /** GET /api/projects — all projects with sprint summaries */
 router.get('/projects', (_req, res) => {
   res.json(buildProjectSummaries());
+});
+
+/** PATCH /api/projects/:id/path — update project directory path */
+router.patch('/projects/:id/path', (req, res) => {
+  const { path } = req.body;
+  if (!path || typeof path !== 'string') {
+    res.status(400).json({ error: 'path is required' });
+    return;
+  }
+
+  const resolved = join(path);
+  if (!resolved.startsWith(ALLOWED_BASE + '/') && resolved !== ALLOWED_BASE) {
+    res.status(400).json({ error: 'Path must be inside /Volumes/Extreme Pro/' });
+    return;
+  }
+
+  if (!existsSync(resolved)) {
+    res.status(400).json({ error: `Directory does not exist: ${resolved}` });
+    return;
+  }
+
+  try {
+    // Create .sprints/ if missing
+    const sprintsDir = join(resolved, '.sprints');
+    if (!existsSync(sprintsDir)) mkdirSync(sprintsDir, { recursive: true });
+
+    updateProjectPath(req.params.id, resolved);
+    res.json({ ok: true, path: resolved });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /** GET /api/projects/:id/sprints — sprints for a single project */

@@ -1824,6 +1824,37 @@ textarea:focus {
   width: auto;
 }
 
+/* Unlinked project state */
+
+.project-group--unlinked {
+  opacity: 0.65;
+}
+
+.project-group--unlinked .project-group-header h2 {
+  color: var(--text-dim);
+}
+
+.project-unlinked-hint {
+  font-style: italic;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+.link-folder-btn {
+  margin-left: auto;
+  font-size: 0.7rem;
+  padding: 0.2rem 0.6rem;
+  background: rgba(255, 152, 0, 0.15);
+  color: #ff9800;
+  border: 1px solid rgba(255, 152, 0, 0.3);
+  border-radius: 4px;
+}
+
+.link-folder-btn:hover {
+  background: #ff9800;
+  color: #fff;
+}
+
 /* --- Mobile: collapse sidebar --- */
 
 @media (max-width: 768px) {

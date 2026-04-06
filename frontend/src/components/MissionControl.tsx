@@ -208,7 +208,7 @@ export function MissionControl() {
               <p className="empty">No active sprints. Use <strong>+ Sprint</strong> in the sidebar to start one.</p>
             )}
             {groups.map((g) => (
-              <GroupSection key={g.id} group={g} projects={data?.projects ?? []} onNewSprint={setNewSprintProject} onOpenTerminal={openTerminalForSprint} />
+              <GroupSection key={g.id} group={g} projects={data?.projects ?? []} onNewSprint={setNewSprintProject} onOpenTerminal={openTerminalForSprint} onProjectLinked={fetchDashboard} />
             ))}
             {ungrouped.length > 0 && ungrouped.some((p) => p.sprints.length > 0) && (
               <GroupSection
@@ -216,6 +216,7 @@ export function MissionControl() {
                 projects={ungrouped}
                 onNewSprint={setNewSprintProject}
                 onOpenTerminal={openTerminalForSprint}
+                onProjectLinked={fetchDashboard}
               />
             )}
             {data?.recommendations && data.recommendations.length > 0 && (

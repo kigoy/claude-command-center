@@ -58,11 +58,13 @@ export function createSession(
   // Attach to existing tmux session (sprint terminal), or recreate if dead
   if (opts?.tmuxSession) {
     if (!tmuxSessionExists(opts.tmuxSession)) {
-      // Session died — recreate it silently so the user gets a fresh shell
+      // Session died — recreate and auto-start claude
+      const env = { ...process.env, CLAUDECODE: undefined, CLAUDE_CODE_ENTRYPOINT: undefined };
       execFileSync('tmux', ['new-session', '-d', '-s', opts.tmuxSession, '-c', cwd], {
-        stdio: 'ignore',
-        env: { ...process.env, CLAUDECODE: undefined, CLAUDE_CODE_ENTRYPOINT: undefined },
+        stdio: 'ignore', env: env as Record<string, string>,
       });
+      execFileSync('tmux', ['send-keys', '-t', opts.tmuxSession, '-l', 'claude --continue'], { stdio: 'ignore' });
+      execFileSync('tmux', ['send-keys', '-t', opts.tmuxSession, 'Enter'], { stdio: 'ignore' });
     }
     insertSession(id, name, cwd);
     setTmuxName(id, opts.tmuxSession);

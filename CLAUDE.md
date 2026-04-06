@@ -2,6 +2,22 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Workflow
+
+Sprint Command is the development workflow engine.
+
+**ON EVERY SESSION START:** Read `/Volumes/Extreme Pro/.gstack/orchestrator.md`
+and follow its Session Start instructions.
+
+- Orchestrator: /Volumes/Extreme Pro/.gstack/orchestrator.md
+- Skills: /Volumes/Extreme Pro/.gstack/skills/
+- Sprint state: .sprints/ directory
+- The orchestrator loads the right skill for the current phase.
+
+## Post-Task
+
+Create FOR_YOCHAI.md after significant work. Coffee-chat tone.
+
 ## Commands
 
 ```bash

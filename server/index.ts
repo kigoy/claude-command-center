@@ -3,7 +3,7 @@ import express from 'express';
 import cookieParser from 'cookie-parser';
 import { createServer } from 'http';
 import { createHash } from 'crypto';
-import { readdirSync, readFileSync, existsSync } from 'fs';
+import { readdirSync, readFileSync, existsSync, statSync } from 'fs';
 import { join, dirname, resolve } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
@@ -356,17 +356,31 @@ app.post('/api/sessions/:id/input', (req, res) => {
 // --- Directory browser ---
 
 app.get('/api/browse', (req, res) => {
-  const rawPath = (req.query.path as string) || '~';
+  const ALLOWED_BASE = '/Volumes/Extreme Pro';
+  const rawPath = (req.query.path as string) || ALLOWED_BASE;
   const resolved = rawPath.startsWith('~')
     ? join(homedir(), rawPath.slice(1))
     : resolve(rawPath);
+
+  // Guard: only allow browsing within the allowed base directory
+  if (!resolved.startsWith(ALLOWED_BASE)) {
+    res.status(403).json({ error: 'Access denied — path outside allowed directory' });
+    return;
+  }
 
   try {
     const entries = readdirSync(resolved, { withFileTypes: true });
     const dirs = entries
       .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
-      .map((e) => e.name)
-      .sort();
+      .map((e) => {
+        try {
+          const st = statSync(join(resolved, e.name));
+          return { name: e.name, modified: st.mtimeMs };
+        } catch {
+          return { name: e.name, modified: 0 };
+        }
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
 
     res.json({ path: resolved, dirs });
   } catch {

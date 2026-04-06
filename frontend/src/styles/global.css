@@ -1484,3 +1484,369 @@ textarea:focus {
   .phase-step { font-size: 0.5rem; padding: 0.15rem 0.3rem; }
   .group-header { padding: 0.5rem 0.75rem; }
 }
+
+/* ================================================
+   MISSION CONTROL — 3-PANEL LAYOUT
+   ================================================ */
+
+.mission-control {
+  display: flex;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+/* --- Sidebar --- */
+
+.mc-sidebar {
+  width: 280px;
+  min-width: 280px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.mc-sidebar-header {
+  padding: 1rem 1rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.mc-sidebar-logo {
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+}
+
+/* Sidebar buttons */
+
+.mc-sidebar-btn {
+  display: block;
+  width: calc(100% - 1.5rem);
+  margin: 0.5rem 0.75rem;
+  text-align: center;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.5rem;
+  border-radius: 6px;
+}
+
+.mc-sidebar-btn--primary {
+  background: var(--accent);
+  color: #fff;
+}
+.mc-sidebar-btn--primary:hover {
+  background: var(--accent-hover);
+}
+
+.mc-sidebar-btn--secondary {
+  background: var(--border);
+  color: var(--text-dim);
+}
+.mc-sidebar-btn--secondary:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Nav items */
+
+.mc-sidebar-nav {
+  padding: 0.25rem 0.5rem;
+}
+
+.mc-nav-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 0.45rem 0.5rem;
+  border-radius: 4px;
+  transition: background 0.12s, color 0.12s;
+}
+
+.mc-nav-item:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+.mc-nav-item--active {
+  background: rgba(108, 99, 255, 0.15);
+  color: var(--accent);
+}
+.mc-nav-item--active:hover {
+  background: rgba(108, 99, 255, 0.2);
+  color: var(--accent);
+}
+
+/* Sidebar sections */
+
+.mc-sidebar-section {
+  padding: 0.25rem 0.5rem;
+}
+
+.mc-sidebar-section--groups {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.mc-section-title {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+  padding: 0.5rem 0.5rem 0.25rem;
+  text-transform: uppercase;
+}
+
+.mc-section-empty {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  padding: 0.25rem 0.5rem;
+  font-style: italic;
+}
+
+/* Session items */
+
+.mc-session-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 4px;
+  transition: background 0.12s, color 0.12s;
+  overflow: hidden;
+}
+
+.mc-session-item:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+.mc-session-item--active {
+  background: rgba(108, 99, 255, 0.15);
+  color: var(--text);
+}
+
+.mc-session-item--unread .mc-session-label {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.mc-session-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #555;
+  flex-shrink: 0;
+}
+
+.mc-session-dot--live {
+  background: #4caf50;
+  box-shadow: 0 0 4px rgba(76, 175, 80, 0.5);
+}
+
+.mc-session-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Groups */
+
+.mc-group {
+  margin-bottom: 0.1rem;
+}
+
+.mc-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.3rem 0.5rem;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+}
+
+.mc-group-toggle:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+.mc-group-chevron {
+  font-size: 0.6rem;
+  width: 0.75rem;
+  text-align: center;
+}
+
+.mc-group-label {
+  flex: 1;
+}
+
+.mc-project-row {
+  display: flex;
+  align-items: center;
+  padding: 0.25rem 0.5rem 0.25rem 1.5rem;
+}
+
+.mc-project-name {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text);
+  flex: 1;
+  letter-spacing: 0.03em;
+}
+
+.mc-project-sprint-btn {
+  font-size: 0.6rem;
+  padding: 0.1rem 0.4rem;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.mc-project-row:hover .mc-project-sprint-btn {
+  opacity: 1;
+}
+
+.mc-project-sprint-btn:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+/* Sidebar footer */
+
+.mc-sidebar-footer {
+  margin-top: auto;
+  padding: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+/* --- Content Area --- */
+
+.mc-content {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  overflow: auto;
+}
+
+.dashboard-content {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+.mc-settings {
+  padding: 2rem;
+}
+
+/* Terminal panels — positioned absolute within content, toggled via display */
+
+.terminal-panel {
+  display: none;
+  position: absolute;
+  inset: 0;
+}
+
+.terminal-panel--visible {
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-panel-inner {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.terminal-panel-inner .xterm {
+  position: absolute;
+  inset: 4px;
+}
+
+/* Dialog wide variant (for AddProject) */
+
+.dialog--wide {
+  width: 480px;
+}
+
+/* Dir entry states */
+
+.dir-entry--selected {
+  background: rgba(108, 99, 255, 0.15);
+  color: var(--accent);
+}
+
+.dir-entry--disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dir-entry-tag {
+  float: right;
+  font-size: 0.6rem;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+/* Checkbox row */
+
+.checkbox-row {
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 0.5rem !important;
+}
+
+.checkbox-row input[type="checkbox"] {
+  width: auto;
+}
+
+/* --- Mobile: collapse sidebar --- */
+
+@media (max-width: 768px) {
+  .mc-sidebar {
+    width: 56px;
+    min-width: 56px;
+  }
+
+  .mc-sidebar-header,
+  .mc-section-title,
+  .mc-session-label,
+  .mc-group-label,
+  .mc-project-name,
+  .mc-project-sprint-btn,
+  .mc-sidebar-btn,
+  .mc-sidebar-footer {
+    display: none;
+  }
+
+  .mc-nav-item,
+  .mc-session-item,
+  .mc-group-toggle {
+    justify-content: center;
+    padding: 0.5rem;
+  }
+}

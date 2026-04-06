@@ -1,0 +1,141 @@
+import { useState } from 'react';
+import type { DashboardData, GroupConfig, ProjectSummary, TmuxSession } from '../types';
+
+export interface OpenTerminal {
+  id: string;
+  name: string;
+  tmuxName: string;
+}
+
+interface Props {
+  data: DashboardData | null;
+  tmuxSessions: TmuxSession[];
+  activeView: 'dashboard' | 'analytics' | 'settings' | null;
+  activeTerminalId: string | null;
+  openTerminals: OpenTerminal[];
+  unreadSessions: Set<string>;
+  onSelectView: (view: 'dashboard' | 'analytics' | 'settings') => void;
+  onSelectSession: (session: TmuxSession) => void;
+  onNewSprint: (projectId: string) => void;
+  onExploreIdea: () => void;
+  onAddProject: () => void;
+}
+
+export function Sidebar({
+  data, tmuxSessions, activeView, activeTerminalId, openTerminals,
+  unreadSessions, onSelectView, onSelectSession, onNewSprint,
+  onExploreIdea, onAddProject,
+}: Props) {
+  const groups = data?.groups ?? [];
+  const projects = data?.projects ?? [];
+
+  return (
+    <aside className="mc-sidebar">
+      <div className="mc-sidebar-header">
+        <h1 className="mc-sidebar-logo">SPRINT COMMAND</h1>
+      </div>
+
+      <button className="mc-sidebar-btn mc-sidebar-btn--primary" onClick={onExploreIdea}>
+        + Explore Idea
+      </button>
+
+      <nav className="mc-sidebar-nav">
+        <button
+          className={`mc-nav-item${activeView === 'dashboard' ? ' mc-nav-item--active' : ''}`}
+          onClick={() => onSelectView('dashboard')}
+        >
+          DASHBOARD
+        </button>
+      </nav>
+
+      {/* Active Sessions */}
+      <div className="mc-sidebar-section">
+        <h3 className="mc-section-title">ACTIVE SESSIONS</h3>
+        {tmuxSessions.length === 0 && (
+          <p className="mc-section-empty">No active sessions</p>
+        )}
+        {tmuxSessions.map((session) => {
+          const linked = openTerminals.find((t) => t.tmuxName === session.sessionName);
+          const isActive = linked?.id === activeTerminalId && activeTerminalId !== null;
+          const hasUnread = linked ? unreadSessions.has(linked.id) : false;
+          return (
+            <button
+              key={session.sessionName}
+              className={`mc-session-item${isActive ? ' mc-session-item--active' : ''}${hasUnread ? ' mc-session-item--unread' : ''}`}
+              onClick={() => onSelectSession(session)}
+            >
+              <span className={`mc-session-dot${session.claudeActive ? ' mc-session-dot--live' : ''}`} />
+              <span className="mc-session-label">
+                {session.projectId} / {session.feature}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Groups */}
+      <div className="mc-sidebar-section mc-sidebar-section--groups">
+        <h3 className="mc-section-title">GROUPS</h3>
+        {groups.map((group) => (
+          <SidebarGroup
+            key={group.id}
+            group={group}
+            projects={projects}
+            onNewSprint={onNewSprint}
+          />
+        ))}
+      </div>
+
+      <button className="mc-sidebar-btn mc-sidebar-btn--secondary" onClick={onAddProject}>
+        + Add Project
+      </button>
+
+      <div className="mc-sidebar-footer">
+        <button
+          className={`mc-nav-item${activeView === 'analytics' ? ' mc-nav-item--active' : ''}`}
+          onClick={() => onSelectView('analytics')}
+        >
+          ANALYTICS
+        </button>
+        <button
+          className={`mc-nav-item${activeView === 'settings' ? ' mc-nav-item--active' : ''}`}
+          onClick={() => onSelectView('settings')}
+        >
+          SETTINGS
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+function SidebarGroup({ group, projects, onNewSprint }: {
+  group: GroupConfig;
+  projects: ProjectSummary[];
+  onNewSprint: (projectId: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const groupProjects = group.projects
+    .map((pid) => projects.find((p) => p.id === pid))
+    .filter((p): p is ProjectSummary => !!p);
+
+  return (
+    <div className="mc-group">
+      <button className="mc-group-toggle" onClick={() => setExpanded(!expanded)}>
+        <span className="mc-group-chevron">{expanded ? '▾' : '▸'}</span>
+        <span className="mc-group-label">{group.label}</span>
+      </button>
+      {expanded && groupProjects.map((project) => (
+        <div key={project.id} className="mc-project-row">
+          <span className="mc-project-name">{project.id.toUpperCase()}</span>
+          <button
+            className="mc-project-sprint-btn"
+            onClick={(e) => { e.stopPropagation(); onNewSprint(project.id); }}
+            title="New sprint"
+          >
+            + Sprint
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}

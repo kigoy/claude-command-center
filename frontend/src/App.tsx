@@ -1,11 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { Login } from './pages/Login';
-import { Dashboard } from './pages/Dashboard';
-import { Terminal } from './pages/Terminal';
 import { Respond } from './pages/Respond';
-import { UpdateToast } from './components/UpdateToast';
-import { SprintDashboard } from './components/SprintDashboard';
+import { MissionControl } from './components/MissionControl';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const [auth, setAuth] = useState<'loading' | 'ok' | 'denied'>('loading');
@@ -24,31 +21,14 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 export function App() {
   return (
     <BrowserRouter>
-      <UpdateToast />
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/respond/:requestId" element={<Respond />} />
         <Route
-          path="/"
+          path="*"
           element={
             <ProtectedRoute>
-              <SprintDashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/sessions"
-          element={
-            <ProtectedRoute>
-              <Dashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/session/:id"
-          element={
-            <ProtectedRoute>
-              <Terminal />
+              <MissionControl />
             </ProtectedRoute>
           }
         />

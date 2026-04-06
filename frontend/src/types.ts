@@ -90,3 +90,11 @@ export interface PhaseHistoryEntry {
 /** All possible sprint phases in order */
 export const PHASE_ORDER = ['PLAN', 'BUILD', 'REVIEW', 'QA', 'SHIP', 'COMPLETE'] as const;
 export type Phase = (typeof PHASE_ORDER)[number];
+
+/** Tmux session detected by the background poller */
+export interface TmuxSession {
+  sessionName: string;
+  projectId: string;
+  feature: string;
+  claudeActive: boolean;
+}

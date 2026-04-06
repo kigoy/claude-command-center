@@ -5,9 +5,10 @@ import type { ProjectSummary } from '../types';
 interface Props {
   project: ProjectSummary;
   onNewSprint: (projectId: string) => void;
+  onOpenTerminal?: (name: string, cwd: string, tmuxSession?: string) => void;
 }
 
-export function ProjectGroup({ project, onNewSprint }: Props) {
+export function ProjectGroup({ project, onNewSprint, onOpenTerminal }: Props) {
   const [showCompleted, setShowCompleted] = useState(false);
 
   const active = project.sprints
@@ -51,6 +52,7 @@ export function ProjectGroup({ project, onNewSprint }: Props) {
               sprint={sprint}
               projectId={project.id}
               projectPath={project.path}
+              onOpenTerminal={onOpenTerminal}
             />
           ))}
         </div>

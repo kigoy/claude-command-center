@@ -6,11 +6,17 @@ interface ProjectOption {
   stack: string;
 }
 
+export interface SprintCreatedResult {
+  feature: string;
+  project: string;
+  session: string;
+}
+
 interface Props {
   projects: ProjectOption[];
   defaultProjectId?: string;
   onClose: () => void;
-  onCreated: () => void;
+  onCreated: (result?: SprintCreatedResult) => void;
 }
 
 export function NewSprintDialog({ projects, defaultProjectId, onClose, onCreated }: Props) {
@@ -38,7 +44,8 @@ export function NewSprintDialog({ projects, defaultProjectId, onClose, onCreated
       });
 
       if (res.ok) {
-        onCreated();
+        const result = await res.json();
+        onCreated(result);
       } else {
         const data = await res.json();
         setError(data.error || 'Failed to create sprint');

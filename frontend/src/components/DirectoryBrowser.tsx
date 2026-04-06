@@ -7,7 +7,7 @@ interface Props {
 }
 
 export function DirectoryBrowser({ value, onChange, label = 'Working Directory' }: Props) {
-  const [dirs, setDirs] = useState<string[]>([]);
+  const [dirs, setDirs] = useState<Array<string | { name: string }>>([]);
   const [resolvedPath, setResolvedPath] = useState('');
   const [showBrowser, setShowBrowser] = useState(false);
 
@@ -25,6 +25,10 @@ export function DirectoryBrowser({ value, onChange, label = 'Working Directory' 
   useEffect(() => {
     browse(value);
   }, [value, browse]);
+
+  function dirName(d: string | { name: string }): string {
+    return typeof d === 'string' ? d : d.name;
+  }
 
   function navigateTo(dir: string) {
     onChange(resolvedPath + '/' + dir);
@@ -67,8 +71,8 @@ export function DirectoryBrowser({ value, onChange, label = 'Working Directory' 
           <div className="dir-list">
             <div className="dir-entry" onClick={navigateUp}>..</div>
             {dirs.map((d) => (
-              <div key={d} className="dir-entry" onClick={() => navigateTo(d)}>
-                {d}/
+              <div key={dirName(d)} className="dir-entry" onClick={() => navigateTo(dirName(d))}>
+                {dirName(d)}/
               </div>
             ))}
             {dirs.length === 0 && (

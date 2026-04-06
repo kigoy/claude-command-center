@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync } from 'fs';
 import yaml from 'js-yaml';
 
 export interface ProjectConfig {
@@ -19,6 +19,7 @@ export interface GroupConfig {
 
 interface GstackConfig {
   version: number;
+  updated?: string;
   projects: Record<string, {
     path: string;
     stack: string;
@@ -111,6 +112,34 @@ export function reload(): void {
   cachedProjects = cachedConfig ? parseProjects(cachedConfig) : [];
   cachedGroups = cachedConfig ? parseGroups(cachedConfig) : [];
   console.log(`[sprint-config] Loaded ${cachedProjects.length} projects, ${cachedGroups.length} groups from ${CONFIG_PATH}`);
+}
+
+/** Add a project to config.yaml and reload. */
+export function addProject(
+  id: string,
+  project: { path: string; stack: string; has_deploy: boolean; deploy_url?: string; default_qa_routing?: string },
+  groupId?: string,
+): void {
+  const config = loadConfig();
+  if (!config) throw new Error('Could not load config.yaml');
+
+  config.projects[id] = {
+    path: project.path,
+    stack: project.stack,
+    has_deploy: project.has_deploy,
+    deploy_url: project.deploy_url,
+    default_qa_routing: project.default_qa_routing || 'has',
+  };
+
+  if (groupId && config.groups?.[groupId]) {
+    if (!config.groups[groupId].projects.includes(id)) {
+      config.groups[groupId].projects = [...config.groups[groupId].projects, id];
+    }
+  }
+
+  config.updated = new Date().toISOString().slice(0, 10);
+  writeFileSync(CONFIG_PATH, yaml.dump(config, { lineWidth: -1, noRefs: true }));
+  reload();
 }
 
 // Initial load

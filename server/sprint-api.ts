@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { readdirSync, readFileSync, existsSync, mkdirSync, writeFileSync, statSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
-import { getProjects, getGroups } from './sprint-config.js';
+import { getProjects, getGroups, addProject } from './sprint-config.js';
 import { readSprintState, writeSprintState, deriveChainStatus, type SprintState, type ChainStatus } from './sprint-state.js';
 import { resolveAtomCounts } from './sprint-atoms.js';
 import { rankRecommendations, type SprintContext } from './sprint-recommendations.js';
@@ -547,6 +547,139 @@ router.post('/skills/new/dismiss', (_req, res) => {
     // File may not exist — that's fine
   }
   res.json({ dismissed: true });
+});
+
+const ALLOWED_BASE = '/Volumes/Extreme Pro';
+const ALLOWED_STACKS = new Set([
+  'python-fastapi-sveltekit', 'typescript-next', 'python-django', 'node-express-react', 'other',
+]);
+
+/** POST /api/projects — add an existing project directory to config.yaml */
+router.post('/projects', (req, res) => {
+  const { path, name, stack, group, has_deploy, deploy_url } = req.body;
+  if (!path || !name || !stack) {
+    res.status(400).json({ error: 'path, name, and stack are required' });
+    return;
+  }
+
+  // Path traversal guard
+  const resolved = join(path);
+  if (!resolved.startsWith(ALLOWED_BASE + '/') && resolved !== ALLOWED_BASE) {
+    res.status(400).json({ error: 'Path must be inside /Volumes/Extreme Pro/' });
+    return;
+  }
+
+  if (!ALLOWED_STACKS.has(stack)) {
+    res.status(400).json({ error: `Invalid stack. Allowed: ${[...ALLOWED_STACKS].join(', ')}` });
+    return;
+  }
+
+  if (!existsSync(resolved)) {
+    res.status(400).json({ error: `Directory does not exist: ${resolved}` });
+    return;
+  }
+
+  const projectId = name.toLowerCase().replace(/[^a-z0-9-]/g, '');
+  if (getProjects().some((p) => p.id === projectId)) {
+    res.status(409).json({ error: `Project '${projectId}' already exists` });
+    return;
+  }
+
+  try {
+    // Create .sprints/ if missing
+    const sprintsDir = join(resolved, '.sprints');
+    if (!existsSync(sprintsDir)) mkdirSync(sprintsDir, { recursive: true });
+
+    addProject(projectId, {
+      path: resolved,
+      stack,
+      has_deploy: !!has_deploy,
+      deploy_url: has_deploy ? deploy_url : undefined,
+    }, group || undefined);
+
+    res.status(201).json({ projectId });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** POST /api/explore-idea — create a new idea project from scratch */
+router.post('/explore-idea', (req, res) => {
+  const { name, description, group } = req.body;
+  if (!name) {
+    res.status(400).json({ error: 'name is required' });
+    return;
+  }
+
+  const slug = name.toLowerCase().replace(/[^a-z0-9-]/g, '');
+  if (!slug) {
+    res.status(400).json({ error: 'Invalid name' });
+    return;
+  }
+
+  const projectPath = `/Volumes/Extreme Pro/${slug}`;
+  if (existsSync(projectPath)) {
+    res.status(409).json({ error: `Directory already exists: ${projectPath}` });
+    return;
+  }
+
+  try {
+    // Create project directory structure
+    mkdirSync(projectPath, { recursive: true });
+
+    // Write starter CLAUDE.md
+    const claudeMd = `# ${slug}\n\n${description || 'New exploration project.'}\n\n## Status\n\nExploration phase.\n`;
+    writeFileSync(join(projectPath, 'CLAUDE.md'), claudeMd);
+
+    // Create sprint directory with STATE.json
+    const sprintDir = join(projectPath, '.sprints', 'feat-exploration');
+    mkdirSync(sprintDir, { recursive: true });
+    const now = new Date().toISOString();
+    const state = {
+      feature: 'feat-exploration',
+      branch: 'main',
+      created: now,
+      phase: 'PLAN',
+      phase_history: [{ phase: 'PLAN', entered: now }],
+      qa_routing: {},
+      blocked: false,
+      blocked_reason: null,
+    };
+    writeFileSync(join(sprintDir, 'STATE.json'), JSON.stringify(state, null, 2) + '\n');
+
+    // Add to config.yaml
+    addProject(slug, {
+      path: projectPath,
+      stack: 'other',
+      has_deploy: false,
+    }, group || undefined);
+
+    // Open tmux session
+    const sessionName = `${slug}-exploration`;
+    try {
+      execFileSync('tmux', ['new-session', '-d', '-s', sessionName, '-c', projectPath], { stdio: 'ignore' });
+
+      // Send claude + /office-hours description (non-blocking)
+      if (description) {
+        const prompt = `/office-hours ${description.slice(0, 200)}`;
+        execFileSync('tmux', ['send-keys', '-t', sessionName, '-l', 'claude']);
+        execFileSync('tmux', ['send-keys', '-t', sessionName, 'Enter']);
+        // Wait for Claude to start, then send prompt (async to avoid blocking event loop)
+        setTimeout(() => {
+          const { execFile } = require('child_process');
+          execFile('tmux', ['send-keys', '-t', sessionName, '-l', prompt], () => {
+            execFile('tmux', ['send-keys', '-t', sessionName, 'Enter'], () => {});
+          });
+        }, 5000);
+      }
+    } catch {
+      // tmux not available — non-fatal
+    }
+
+    res.status(201).json({ projectId: slug, session: sessionName, path: projectPath, feature: 'feat-exploration' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 export default router;

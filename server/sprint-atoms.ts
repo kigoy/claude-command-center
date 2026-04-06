@@ -9,13 +9,22 @@ export function parseAtomCounts(sprintDir: string): { total: number; completed: 
   try {
     const raw = readFileSync(atomsPath, 'utf-8');
     const statusLines = raw.match(/^- Status:\s*.+$/gm) || [];
-    const total = statusLines.length;
+    const statusTotal = statusLines.length;
     const statusCompleted = statusLines.filter(
       (line) => /\bDONE\b/i.test(line) || /\bCOMPLETE\b/i.test(line) || line.includes('\u2705'),
     ).length;
-    // Also count heading-level checkmarks (e.g., "### Atom 1: title ✅")
+    // Count heading-level atoms (e.g., "### Atom 1: title" or "### Atom 1: title ✅")
+    const headingAtoms = raw.match(/^###\s+Atom\s+\d+:/gm) || [];
+    const headingTotal = headingAtoms.length;
     const headingCompleted = (raw.match(/^###\s+Atom\s+\d+:.+\u2705/gm) || []).length;
-    return { total, completed: Math.max(statusCompleted, headingCompleted) };
+    // Also count checkbox-style atoms: "- [x] Atom 1" / "- [ ] Atom 1"
+    const checkboxes = raw.match(/^- \[[ x]\]\s+/gm) || [];
+    const checkboxTotal = checkboxes.length;
+    const checkboxCompleted = (raw.match(/^- \[x\]\s+/gm) || []).length;
+    // Use whichever format yields the most atoms
+    const total = Math.max(statusTotal, headingTotal, checkboxTotal);
+    const completed = Math.max(statusCompleted, headingCompleted, checkboxCompleted);
+    return { total, completed };
   } catch {
     return null;
   }

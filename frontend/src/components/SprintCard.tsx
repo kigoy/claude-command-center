@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { PhaseStepper } from './PhaseStepper';
 import { SprintTimeline } from './SprintTimeline';
 import { SprintActions } from './SprintActions';
@@ -9,6 +8,7 @@ interface Props {
   sprint: SprintSummary;
   projectId: string;
   projectPath: string;
+  onOpenTerminal?: (name: string, cwd: string, tmuxSession?: string) => void;
 }
 
 const HEALTH_COLORS: Record<string, string> = {
@@ -83,8 +83,7 @@ function PhaseDetailView({ entry }: { entry: PhaseHistoryEntry }) {
   );
 }
 
-export function SprintCard({ sprint, projectId, projectPath }: Props) {
-  const navigate = useNavigate();
+export function SprintCard({ sprint, projectId, projectPath, onOpenTerminal }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<SprintDetail | null>(null);
   const [pickedPhase, setPickedPhase] = useState<Phase | null>(null);
@@ -106,21 +105,10 @@ export function SprintCard({ sprint, projectId, projectPath }: Props) {
 
   function handleTerminal(e: React.MouseEvent) {
     e.stopPropagation();
-    const body: Record<string, string> = {
-      name: `${projectId}/${sprint.feature}`,
-      cwd: projectPath,
-    };
-    if (sprint.tmux_active && sprint.tmux_session) {
-      body.tmuxSession = sprint.tmux_session;
-    }
-    fetch('/api/sessions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-      .then((r) => r.json())
-      .then((s) => navigate(`/session/${s.id}`))
-      .catch(console.error);
+    if (!onOpenTerminal) return;
+    const name = `${projectId}/${sprint.feature}`;
+    const tmuxSession = sprint.tmux_active && sprint.tmux_session ? sprint.tmux_session : undefined;
+    onOpenTerminal(name, projectPath, tmuxSession);
   }
 
   const historyForStepper = detail ? detail.phase_history : [];
@@ -162,6 +150,8 @@ export function SprintCard({ sprint, projectId, projectPath }: Props) {
               </div>
               <span className="atom-bar-label">{sprint.atoms_completed}/{sprint.atoms_total}</span>
             </div>
+          ) : sprint.has_atoms && sprint.atoms_total === 0 ? (
+            <span className="sprint-no-atoms">ATOMS.md (parsing...)</span>
           ) : (
             <span className="sprint-no-atoms">{!sprint.has_atoms && sprint.phase !== 'PLAN' ? 'No ATOMS.md' : '--'}</span>
           )}

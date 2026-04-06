@@ -3,6 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { ProjectGroup } from './ProjectGroup';
 import { NewSprintDialog } from './NewSprintDialog';
 
+interface ChainStatus {
+  plan_done: boolean;
+  review_done: boolean;
+  qa_done: boolean;
+  qa_required: boolean;
+}
+
 interface SprintSummary {
   feature: string;
   phase: string;
@@ -10,8 +17,12 @@ interface SprintSummary {
   blocked_reason: string | null;
   atoms_total: number;
   atoms_completed: number;
+  has_atoms: boolean;
   last_activity: string;
   branch: string;
+  tmux_session: string;
+  tmux_active: boolean;
+  chain_status: ChainStatus;
 }
 
 interface ProjectSummary {
@@ -23,9 +34,19 @@ interface ProjectSummary {
   sprints: SprintSummary[];
 }
 
+interface Recommendation {
+  text: string;
+  project: string;
+  feature: string;
+  phase: string;
+  effort_minutes: number;
+  score: number;
+}
+
 interface DashboardData {
   projects: ProjectSummary[];
   recommendation: string;
+  recommendations?: Recommendation[];
 }
 
 export function SprintDashboard() {
@@ -76,7 +97,7 @@ export function SprintDashboard() {
 
       <header className="dashboard-header">
         <h1>SPRINT COMMAND</h1>
-        <button onClick={() => navigate('/')}>Sessions</button>
+        <button onClick={() => navigate('/sessions')}>Sessions</button>
       </header>
 
       {!data && <p className="empty">Loading...</p>}
@@ -92,14 +113,27 @@ export function SprintDashboard() {
           key={project.id}
           project={project}
           onNewSprint={(id) => setNewSprintProject(id)}
+          onRefresh={fetchDashboard}
         />
       ))}
 
-      {data?.recommendation && (
+      {data?.recommendations && data.recommendations.length > 0 ? (
+        <div className="recommendation-bar">
+          <strong>RECOMMEND:</strong>
+          <ol className="recommendation-list">
+            {data.recommendations.map((r, i) => (
+              <li key={i} className="recommendation-item">
+                <span className="recommendation-text">{r.text}</span>
+                <span className="recommendation-effort">~{r.effort_minutes}min</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : data?.recommendation ? (
         <div className="recommendation-bar">
           <strong>RECOMMEND:</strong> {data.recommendation}
         </div>
-      )}
+      ) : null}
       {newSprintProject !== null && data && (
         <NewSprintDialog
           projects={data.projects.map((p) => ({ id: p.id, path: p.path, stack: p.stack }))}

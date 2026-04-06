@@ -37,7 +37,8 @@ function getOrSpawnPty(sessionId: string, cols = 80, rows = 24): pty.IPty | null
   const session = getSession(sessionId);
   if (!session || session.status === 'dead') return null;
 
-  const tmuxName = `${TMUX_PREFIX}${sessionId}`;
+  // Use custom tmux session name (sprint sessions) or default cc- prefix
+  const tmuxName = session.tmux_name || `${TMUX_PREFIX}${sessionId}`;
   console.log('[pty] spawning for', tmuxName, `${cols}x${rows}`);
 
   const term = pty.spawn('tmux', ['attach-session', '-t', tmuxName], {

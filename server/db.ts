@@ -26,6 +26,7 @@ try { db.exec(`ALTER TABLE sessions ADD COLUMN worktree_path TEXT`); } catch {}
 try { db.exec(`ALTER TABLE sessions ADD COLUMN repo TEXT`); } catch {}
 try { db.exec(`ALTER TABLE sessions ADD COLUMN pane_title TEXT`); } catch {}
 try { db.exec(`ALTER TABLE sessions ADD COLUMN rocket_mode INTEGER NOT NULL DEFAULT 0`); } catch {}
+try { db.exec(`ALTER TABLE sessions ADD COLUMN tmux_name TEXT`); } catch {}
 
 export interface Session {
   id: string;
@@ -38,6 +39,7 @@ export interface Session {
   repo: string | null;
   pane_title: string | null;
   rocket_mode: number;
+  tmux_name: string | null;
 }
 
 const stmts = {
@@ -64,6 +66,9 @@ const stmts = {
   ),
   touch: db.prepare(
     `UPDATE sessions SET last_activity = datetime('now') WHERE id = ?`
+  ),
+  setTmuxName: db.prepare(
+    'UPDATE sessions SET tmux_name = ? WHERE id = ?'
   ),
 };
 
@@ -105,6 +110,10 @@ export function renameSession(id: string, name: string) {
 
 export function touchSession(id: string) {
   stmts.touch.run(id);
+}
+
+export function setTmuxName(id: string, tmuxName: string) {
+  stmts.setTmuxName.run(tmuxName, id);
 }
 
 export default db;

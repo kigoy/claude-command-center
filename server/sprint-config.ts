@@ -11,6 +11,12 @@ export interface ProjectConfig {
   worktree_root?: string;
 }
 
+export interface GroupConfig {
+  id: string;
+  label: string;
+  projects: string[];
+}
+
 interface GstackConfig {
   version: number;
   projects: Record<string, {
@@ -20,6 +26,10 @@ interface GstackConfig {
     deploy_url?: string;
     default_qa_routing: string;
     worktree_root?: string;
+  }>;
+  groups?: Record<string, {
+    label: string;
+    projects: string[];
   }>;
   notifications?: {
     enabled: boolean;
@@ -32,6 +42,7 @@ interface GstackConfig {
 const CONFIG_PATH = process.env.GSTACK_CONFIG || '/Volumes/Extreme Pro/.gstack/config.yaml';
 
 let cachedProjects: ProjectConfig[] = [];
+let cachedGroups: GroupConfig[] = [];
 let cachedConfig: GstackConfig | null = null;
 
 function loadConfig(): GstackConfig | null {
@@ -61,12 +72,29 @@ function parseProjects(config: GstackConfig): ProjectConfig[] {
   }));
 }
 
+function parseGroups(config: GstackConfig): GroupConfig[] {
+  if (!config.groups) return [];
+  return Object.entries(config.groups).map(([id, group]) => ({
+    id,
+    label: group.label,
+    projects: [...group.projects],
+  }));
+}
+
 /** Load projects from config.yaml. Caches result until reload(). */
 export function getProjects(): ProjectConfig[] {
   if (cachedProjects.length === 0) {
     reload();
   }
   return cachedProjects;
+}
+
+/** Get project groups from config.yaml. Caches result until reload(). */
+export function getGroups(): GroupConfig[] {
+  if (cachedGroups.length === 0 && !cachedConfig) {
+    reload();
+  }
+  return cachedGroups;
 }
 
 /** Get the raw config (for notifications section, etc.) */
@@ -81,7 +109,8 @@ export function getConfig(): GstackConfig | null {
 export function reload(): void {
   cachedConfig = loadConfig();
   cachedProjects = cachedConfig ? parseProjects(cachedConfig) : [];
-  console.log(`[sprint-config] Loaded ${cachedProjects.length} projects from ${CONFIG_PATH}`);
+  cachedGroups = cachedConfig ? parseGroups(cachedConfig) : [];
+  console.log(`[sprint-config] Loaded ${cachedProjects.length} projects, ${cachedGroups.length} groups from ${CONFIG_PATH}`);
 }
 
 // Initial load

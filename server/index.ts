@@ -17,6 +17,8 @@ import { notifyWaiting } from './notifier.js';
 import { startStatusPolling } from './status.js';
 import { createRequest, getRequest, setResponse, getResponse } from './mcp-responses.js';
 import sprintApi from './sprint-api.js';
+import { setupSprintSSE } from './sprint-sse.js';
+import { startTmuxDetection, getSprintSessions } from './tmux-detect.js';
 import { startSprintNotifications } from './sprint-notifications.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -225,6 +227,16 @@ app.post('/api/mcp/respond', (req, res) => {
 
 app.use('/api', sprintApi);
 
+// --- Sprint SSE (live updates) ---
+
+setupSprintSSE(app);
+
+// --- Tmux Sprint Sessions ---
+
+app.get('/api/tmux-sessions', (_req, res) => {
+  res.json(getSprintSessions());
+});
+
 // --- Sessions ---
 
 app.get('/api/sessions', (_req, res) => {
@@ -241,7 +253,7 @@ app.get('/api/sessions/:id', (req, res) => {
 });
 
 app.post('/api/sessions', (req, res) => {
-  const { name, cwd, command, worktreePath, initialPrompt, repo, rocketMode } = req.body;
+  const { name, cwd, command, worktreePath, initialPrompt, repo, rocketMode, tmuxSession } = req.body;
 
   if (!name || !cwd) {
     res.status(400).json({ error: 'name and cwd are required' });
@@ -249,7 +261,7 @@ app.post('/api/sessions', (req, res) => {
   }
 
   try {
-    const session = createSession(name, cwd, command, { worktreePath, initialPrompt, repo });
+    const session = createSession(name, cwd, command, { worktreePath, initialPrompt, repo, tmuxSession });
     if (rocketMode) setRocketMode(session.id, true);
     res.status(201).json({ ...session, rocket_mode: rocketMode ? 1 : 0 });
   } catch (err: any) {
@@ -389,6 +401,7 @@ setupTerminalWs(server);
 // Sync existing tmux sessions on startup
 syncSessionsWithTmux();
 startStatusPolling();
+startTmuxDetection();
 
 server.listen(PORT, () => {
   console.log(`Sprint Command Center running on http://localhost:${PORT}`);

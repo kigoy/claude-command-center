@@ -8,6 +8,7 @@ import {
   updateSessionStatus,
   removeSession,
   setSessionMeta,
+  setTmuxName,
   type Session,
 } from './db.js';
 import { sendInput } from './input.js';
@@ -32,6 +33,7 @@ interface CreateSessionOpts {
   worktreePath?: string;
   initialPrompt?: string;
   repo?: string;
+  tmuxSession?: string;
 }
 
 /** Create a new session in tmux. Defaults to `claude` but supports any command. */
@@ -42,6 +44,15 @@ export function createSession(
   opts?: CreateSessionOpts,
 ): Session {
   const id = nanoid(10);
+
+  // Attach to existing tmux session (sprint terminal) — skip creating a new one
+  if (opts?.tmuxSession && tmuxSessionExists(opts.tmuxSession)) {
+    insertSession(id, name, cwd);
+    setTmuxName(id, opts.tmuxSession);
+    updateSessionStatus(id, 'running');
+    return getSession(id)!;
+  }
+
   const tmuxName = tmuxSessionName(id);
 
   // Default to claude, but allow any TUI command

@@ -107,8 +107,8 @@ export function SprintCard({ sprint, projectId, projectPath, onOpenTerminal }: P
     e.stopPropagation();
     if (!onOpenTerminal) return;
     const name = `${projectId}/${sprint.feature}`;
-    const tmuxSession = sprint.tmux_active && sprint.tmux_session ? sprint.tmux_session : undefined;
-    onOpenTerminal(name, projectPath, tmuxSession);
+    // Always pass tmux_session — server recreates dead sessions silently
+    onOpenTerminal(name, projectPath, sprint.tmux_session || undefined);
   }
 
   const historyForStepper = detail ? detail.phase_history : [];

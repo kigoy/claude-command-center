@@ -55,8 +55,15 @@ export function createSession(
 
   const id = nanoid(10);
 
-  // Attach to existing tmux session (sprint terminal) — skip creating a new one
-  if (opts?.tmuxSession && tmuxSessionExists(opts.tmuxSession)) {
+  // Attach to existing tmux session (sprint terminal), or recreate if dead
+  if (opts?.tmuxSession) {
+    if (!tmuxSessionExists(opts.tmuxSession)) {
+      // Session died — recreate it silently so the user gets a fresh shell
+      execFileSync('tmux', ['new-session', '-d', '-s', opts.tmuxSession, '-c', cwd], {
+        stdio: 'ignore',
+        env: { ...process.env, CLAUDECODE: undefined, CLAUDE_CODE_ENTRYPOINT: undefined },
+      });
+    }
     insertSession(id, name, cwd);
     setTmuxName(id, opts.tmuxSession);
     updateSessionStatus(id, 'running');

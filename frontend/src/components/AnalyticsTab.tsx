@@ -51,13 +51,19 @@ export function AnalyticsTab() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    fetch('/api/analytics', { signal: AbortSignal.timeout(10_000) })
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then(setData)
-      .catch((err) => setError(err.message));
+    let cancelled = false;
+    function fetchAnalytics() {
+      fetch('/api/analytics', { signal: AbortSignal.timeout(10_000) })
+        .then((res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
+        })
+        .then((d) => { if (!cancelled) setData(d); })
+        .catch((err) => { if (!cancelled) setError(err.message); });
+    }
+    fetchAnalytics();
+    const id = setInterval(fetchAnalytics, 30_000);
+    return () => { cancelled = true; clearInterval(id); };
   }, []);
 
   if (error) return <p className="empty">Failed to load analytics: {error}</p>;

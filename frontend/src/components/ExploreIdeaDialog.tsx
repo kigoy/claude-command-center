@@ -103,11 +103,12 @@ export function ExploreIdeaDialog({ groups, projects, onClose, onCreated }: Prop
         </label>
 
         <label>
-          One-line Description
-          <input
+          Describe your idea
+          <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="What are you exploring?"
+            placeholder="What are you exploring? What problem does it solve?"
+            rows={4}
           />
         </label>
 

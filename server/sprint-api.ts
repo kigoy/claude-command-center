@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { readdirSync, readFileSync, existsSync, mkdirSync, writeFileSync, statSync, unlinkSync } from 'fs';
 import { join } from 'path';
+import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
 import { getProjects, getGroups, addProject, updateProjectPath } from './sprint-config.js';
 import { readSprintState, writeSprintState, deriveChainStatus, type SprintState, type ChainStatus } from './sprint-state.js';
@@ -685,14 +686,19 @@ router.post('/explore-idea', (req, res) => {
       try {
         execFileSync('tmux', ['new-session', '-d', '-s', sessionName, '-c', project.path], { stdio: 'ignore' });
         if (description) {
-          const prompt = `Read /Volumes/Extreme Pro/.gstack/skills/office-hours/SKILL.md and run office-hours on this idea: ${description.slice(0, 200)}`;
           execFileSync('tmux', ['send-keys', '-t', sessionName, '-l', 'claude']);
           execFileSync('tmux', ['send-keys', '-t', sessionName, 'Enter']);
+          // Use load-buffer + paste-buffer to preserve newlines in multi-line descriptions
           setTimeout(() => {
-            const { execFile } = require('child_process');
-            execFile('tmux', ['send-keys', '-t', sessionName, '-l', prompt], () => {
-              execFile('tmux', ['send-keys', '-t', sessionName, 'Enter'], () => {});
-            });
+            try {
+              const prompt = `Read /Volumes/Extreme Pro/.gstack/skills/office-hours/SKILL.md and run office-hours on this idea:\n\n${description.slice(0, 500)}`;
+              const tmpFile = join(tmpdir(), `explore-${Date.now()}.txt`);
+              writeFileSync(tmpFile, prompt);
+              execFileSync('tmux', ['load-buffer', tmpFile]);
+              execFileSync('tmux', ['paste-buffer', '-t', sessionName]);
+              execFileSync('tmux', ['send-keys', '-t', sessionName, 'Enter']);
+              unlinkSync(tmpFile);
+            } catch { /* ignore */ }
           }, 5000);
         }
       } catch { /* tmux not available */ }
@@ -747,14 +753,18 @@ router.post('/explore-idea', (req, res) => {
     try {
       execFileSync('tmux', ['new-session', '-d', '-s', sessionName, '-c', projectPath], { stdio: 'ignore' });
       if (description) {
-        const prompt = `Read /Volumes/Extreme Pro/.gstack/skills/office-hours/SKILL.md and run office-hours on this idea: ${description.slice(0, 200)}`;
         execFileSync('tmux', ['send-keys', '-t', sessionName, '-l', 'claude']);
         execFileSync('tmux', ['send-keys', '-t', sessionName, 'Enter']);
         setTimeout(() => {
-          const { execFile } = require('child_process');
-          execFile('tmux', ['send-keys', '-t', sessionName, '-l', prompt], () => {
-            execFile('tmux', ['send-keys', '-t', sessionName, 'Enter'], () => {});
-          });
+          try {
+            const prompt = `Read /Volumes/Extreme Pro/.gstack/skills/office-hours/SKILL.md and run office-hours on this idea:\n\n${description.slice(0, 500)}`;
+            const tmpFile = join(tmpdir(), `explore-${Date.now()}.txt`);
+            writeFileSync(tmpFile, prompt);
+            execFileSync('tmux', ['load-buffer', tmpFile]);
+            execFileSync('tmux', ['paste-buffer', '-t', sessionName]);
+            execFileSync('tmux', ['send-keys', '-t', sessionName, 'Enter']);
+            unlinkSync(tmpFile);
+          } catch { /* ignore */ }
         }, 5000);
       }
     } catch { /* tmux not available */ }

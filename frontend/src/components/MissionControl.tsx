@@ -9,6 +9,8 @@ import { NewSprintDialog } from './NewSprintDialog';
 import { ExploreIdeaDialog } from './ExploreIdeaDialog';
 import { AddProjectDialog } from './AddProjectDialog';
 import { AnalyticsTab } from './AnalyticsTab';
+import { AlertBanner } from './AlertBanner';
+import { SettingsPage } from './SettingsPage';
 import { UpdateToast } from './UpdateToast';
 import { useSprintSSE } from '../hooks/use-sprint-sse';
 import { useBoard } from '../hooks/use-board';
@@ -391,6 +393,7 @@ export function MissionControl() {
     <div className="mission-control">
       {offline && <div className="offline-banner">Connection lost — retrying...</div>}
       <UpdateToast />
+      <AlertBanner />
       {actionToast && (
         <div className={`action-toast action-toast--${actionToast.ok ? 'ok' : 'err'}`}>
           {actionToast.msg}
@@ -482,7 +485,7 @@ export function MissionControl() {
 
         {/* Settings view */}
         {!showingTerminal && activeView === 'settings' && (
-          <div className="mc-settings"><h2>Settings</h2><p className="empty">Configuration coming soon.</p></div>
+          <SettingsPage />
         )}
 
         {/* Terminal panels — all stay mounted, only active is visible */}

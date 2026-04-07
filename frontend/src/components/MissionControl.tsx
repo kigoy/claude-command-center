@@ -377,6 +377,19 @@ export function MissionControl() {
     }
   }, [fetchDashboard]);
 
+  const handleArchive = useCallback(async (projectId: string, feature: string) => {
+    try {
+      await postJson(`/api/sprints/${projectId}/${feature}/archive`, {});
+      setActionToast({ msg: `Archived ${projectId}/${feature.replace(/^feat-/, '')}`, ok: true });
+      fetchDashboard();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Archive failed';
+      setActionToast({ msg, ok: false });
+    } finally {
+      setTimeout(() => setActionToast(null), ACTION_TOAST_DURATION_MS);
+    }
+  }, [fetchDashboard]);
+
   const handleSelectView = useCallback((view: View) => {
     setActiveView(view);
     setActiveTerminalId(null);
@@ -445,6 +458,7 @@ export function MissionControl() {
             onOpenTerminal={openTerminalForSprint}
             terminalSnippets={terminalSnippets}
             onAction={handleSprintAction}
+            onArchive={handleArchive}
           />
         )}
 

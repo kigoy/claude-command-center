@@ -548,6 +548,45 @@
 }
 
 /* ================================================
+   ARCHIVE BUTTON (Phase 6 Atom 2)
+   ================================================ */
+
+.board-card-archive-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  cursor: pointer;
+  width: 100%;
+}
+.board-card-archive-btn:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+
+/* ================================================
+   CONFETTI (Phase 6 Atom 9)
+   ================================================ */
+
+@keyframes confetti-burst {
+  0% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.5); }
+}
+
+.board-card--complete-burst::after {
+  content: '🎉';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 2rem;
+  pointer-events: none;
+  animation: confetti-burst 1s ease-out forwards;
+}
+
+/* ================================================
    BOARD FILTERS (Phase 6 Atom 8)
    ================================================ */
 

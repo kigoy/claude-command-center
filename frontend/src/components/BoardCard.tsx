@@ -12,6 +12,7 @@ interface Props {
   focused?: boolean;
   terminalSnippet?: string[];
   onAction?: (command: string, toPhase: string) => Promise<void>;
+  onArchive?: (projectId: string, feature: string) => void;
 }
 
 interface PhaseAction {
@@ -176,7 +177,7 @@ function BoardCardTimeline({ phaseHistory, created, isComplete }: {
   );
 }
 
-export function BoardCard({ sprint, onOpenTerminal, onSelect, selected, focused, terminalSnippet, onAction }: Props) {
+export function BoardCard({ sprint, onOpenTerminal, onSelect, selected, focused, terminalSnippet, onAction, onArchive }: Props) {
   const health: Health = getHealth(sprint);
   const healthColor = HEALTH_COLORS[health];
   const projectColor = getProjectColor(sprint.projectId);
@@ -297,6 +298,18 @@ export function BoardCard({ sprint, onOpenTerminal, onSelect, selected, focused,
             onClick={handleAction}
           >
             {actionPending ? '…' : confirmingShip ? 'Confirm ship?' : action.label}
+          </button>
+        </div>
+      )}
+
+      {/* Archive button (COMPLETE only) */}
+      {sprint.phase === 'COMPLETE' && onArchive && (
+        <div className="board-card-footer" onClick={(e) => e.stopPropagation()}>
+          <button
+            className="board-card-archive-btn"
+            onClick={() => onArchive(sprint.projectId, sprint.feature)}
+          >
+            Archive
           </button>
         </div>
       )}

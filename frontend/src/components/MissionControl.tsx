@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Sidebar, type OpenTerminal } from './Sidebar';
+import { Sidebar } from './Sidebar';
 import { TerminalPanel } from './TerminalPanel';
 import { GroupSection } from './GroupSection';
 import { PipelineBoard } from './PipelineBoard';
@@ -14,6 +14,8 @@ import { SettingsPage } from './SettingsPage';
 import { UpdateToast } from './UpdateToast';
 import { useSprintSSE } from '../hooks/use-sprint-sse';
 import { useBoard } from '../hooks/use-board';
+import { useTerminals } from '../hooks/use-terminals';
+import { useKeyboardNav } from '../hooks/use-keyboard-nav';
 import type { DashboardData, TmuxSession } from '../types';
 
 type View = 'dashboard' | 'board' | 'analytics' | 'settings';
@@ -21,11 +23,8 @@ type View = 'dashboard' | 'board' | 'analytics' | 'settings';
 export function MissionControl() {
   const navigate = useNavigate();
   const [activeView, setActiveView] = useState<View | null>('board');
-  const [activeTerminalId, setActiveTerminalId] = useState<string | null>(null);
-  const [openTerminals, setOpenTerminals] = useState<OpenTerminal[]>([]);
   const [data, setData] = useState<DashboardData | null>(null);
   const [tmuxSessions, setTmuxSessions] = useState<TmuxSession[]>([]);
-  const [unreadSessions, setUnreadSessions] = useState<Set<string>>(new Set());
   const [newSprintProject, setNewSprintProject] = useState<string | null>(null);
   const [showExploreIdea, setShowExploreIdea] = useState(false);
   const [showAddProject, setShowAddProject] = useState(false);
@@ -35,131 +34,31 @@ export function MissionControl() {
   const [terminalSnippets, setTerminalSnippets] = useState<Map<string, string[]>>(new Map());
   const [actionToast, setActionToast] = useState<{ msg: string; ok: boolean } | null>(null);
   const failCount = useRef(0);
-  const openingTerminals = useRef(new Set<string>());
 
   const { columns, allSprints, doneCount, showDone, setShowDone, filter, setFilter, projectIds } = useBoard(data);
-  const [focusedCardIndex, setFocusedCardIndex] = useState<number | null>(null);
 
-  // Total card count across all visible columns (flat index)
+  const clearView = useCallback(() => setActiveView(null), []);
+
+  const {
+    activeTerminalId, setActiveTerminalId, openTerminals, unreadSessions,
+    openTerminalForSession, openTerminalByTmuxName, openTerminalForSprint, handleTerminalActivity,
+  } = useTerminals({ data, onActivate: clearView });
+
   const totalCards = columns.reduce((n, col) => n + col.sprints.length, 0);
 
-  // --- Keyboard navigation ---
+  const handleEscapeTerminal = useCallback(() => {
+    setActiveTerminalId(null);
+    setActiveView('board');
+  }, [setActiveTerminalId]);
 
-  useEffect(() => {
-    function handleBoardKeys(e: KeyboardEvent) {
-      // Only active on board view, not in terminal
-      if (activeView !== 'board' || activeTerminalId !== null) {
-        // Esc from terminal returns to board
-        if (e.key === 'Escape' && activeTerminalId !== null) {
-          e.preventDefault();
-          setActiveTerminalId(null);
-          setActiveView('board');
-        }
-        return;
-      }
-      if (totalCards === 0) return;
-
-      // Resolve flat index to {columnIndex, cardIndexInColumn}
-      function resolve(flat: number) {
-        let remaining = flat;
-        for (let ci = 0; ci < columns.length; ci++) {
-          if (remaining < columns[ci].sprints.length) return { ci, ri: remaining };
-          remaining -= columns[ci].sprints.length;
-        }
-        return { ci: 0, ri: 0 };
-      }
-
-      // Build flat index from column + row
-      function flatten(ci: number, ri: number): number {
-        let idx = 0;
-        for (let c = 0; c < ci; c++) idx += columns[c].sprints.length;
-        return idx + ri;
-      }
-
-      const current = focusedCardIndex ?? -1;
-
-      switch (e.key) {
-        case 'ArrowRight': {
-          e.preventDefault();
-          if (current < 0) { setFocusedCardIndex(0); return; }
-          const { ci, ri } = resolve(current);
-          for (let next = ci + 1; next < columns.length; next++) {
-            if (columns[next].sprints.length > 0) {
-              const row = Math.min(ri, columns[next].sprints.length - 1);
-              setFocusedCardIndex(flatten(next, row));
-              return;
-            }
-          }
-          break;
-        }
-        case 'ArrowLeft': {
-          e.preventDefault();
-          if (current < 0) { setFocusedCardIndex(0); return; }
-          const { ci, ri } = resolve(current);
-          for (let prev = ci - 1; prev >= 0; prev--) {
-            if (columns[prev].sprints.length > 0) {
-              const row = Math.min(ri, columns[prev].sprints.length - 1);
-              setFocusedCardIndex(flatten(prev, row));
-              return;
-            }
-          }
-          break;
-        }
-        case 'ArrowDown': {
-          e.preventDefault();
-          if (current < 0) { setFocusedCardIndex(0); return; }
-          const { ci, ri } = resolve(current);
-          if (ri + 1 < columns[ci].sprints.length) {
-            setFocusedCardIndex(flatten(ci, ri + 1));
-          }
-          break;
-        }
-        case 'ArrowUp': {
-          e.preventDefault();
-          if (current < 0) { setFocusedCardIndex(0); return; }
-          const { ci, ri } = resolve(current);
-          if (ri - 1 >= 0) {
-            setFocusedCardIndex(flatten(ci, ri - 1));
-          }
-          break;
-        }
-        case 'Tab': {
-          e.preventDefault();
-          const next = current < 0 ? 0 : (current + (e.shiftKey ? -1 : 1) + totalCards) % totalCards;
-          setFocusedCardIndex(next);
-          break;
-        }
-        case 'Enter': {
-          if (current >= 0) {
-            e.preventDefault();
-            let idx = current;
-            for (const col of columns) {
-              if (idx < col.sprints.length) {
-                const sprint = col.sprints[idx];
-                openTerminalForSprint(
-                  `${sprint.projectId}/${sprint.feature}`,
-                  sprint.projectPath,
-                  sprint.tmux_session || undefined,
-                );
-                break;
-              }
-              idx -= col.sprints.length;
-            }
-          }
-          break;
-        }
-        case 'Escape': {
-          e.preventDefault();
-          setFocusedCardIndex(null);
-          break;
-        }
-        default:
-          return;
-      }
-    }
-    document.addEventListener('keydown', handleBoardKeys);
-    return () => document.removeEventListener('keydown', handleBoardKeys);
-  }, [activeView, activeTerminalId, focusedCardIndex, totalCards, columns, openTerminalForSprint]);
+  const { focusedCardIndex } = useKeyboardNav({
+    columns,
+    totalCardCount: totalCards,
+    activeView,
+    activeTerminalId,
+    onOpenTerminal: openTerminalForSprint,
+    onEscapeTerminal: handleEscapeTerminal,
+  });
 
   // --- Data fetching ---
 
@@ -257,94 +156,7 @@ export function MissionControl() {
     return () => window.removeEventListener('keydown', handleKey);
   }, []);
 
-  // --- Terminal management ---
-
-  const openTerminalForSession = useCallback(async (session: TmuxSession) => {
-    const existing = openTerminals.find((t) => t.tmuxName === session.sessionName);
-    if (existing) {
-      setActiveTerminalId(existing.id);
-      setActiveView(null);
-      setUnreadSessions((prev) => { const n = new Set(prev); n.delete(existing.id); return n; });
-      return;
-    }
-    // Prevent duplicate server sessions from rapid clicks
-    if (openingTerminals.current.has(session.sessionName)) return;
-    openingTerminals.current.add(session.sessionName);
-    const project = data?.projects.find((p) => p.id === session.projectId);
-    try {
-      const res = await fetch('/api/sessions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: session.sessionName, cwd: project?.path || '/tmp', tmuxSession: session.sessionName }),
-      });
-      if (res.ok) {
-        const s = await res.json();
-        setOpenTerminals((prev) => [...prev, { id: s.id, name: `${session.projectId} / ${session.feature}`, tmuxName: session.sessionName }]);
-        setActiveTerminalId(s.id);
-        setActiveView(null);
-      }
-    } catch { /* ignore */ } finally {
-      openingTerminals.current.delete(session.sessionName);
-    }
-  }, [openTerminals, data]);
-
-  const openTerminalByTmuxName = useCallback(async (tmuxName: string, cwd: string) => {
-    const existing = openTerminals.find((t) => t.tmuxName === tmuxName);
-    if (existing) { setActiveTerminalId(existing.id); setActiveView(null); return; }
-    if (openingTerminals.current.has(tmuxName)) return;
-    openingTerminals.current.add(tmuxName);
-    try {
-      const res = await fetch('/api/sessions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: tmuxName, cwd, tmuxSession: tmuxName }),
-      });
-      if (res.ok) {
-        const s = await res.json();
-        setOpenTerminals((prev) => [...prev, { id: s.id, name: tmuxName, tmuxName }]);
-        setActiveTerminalId(s.id);
-        setActiveView(null);
-      }
-    } catch { /* ignore */ } finally {
-      openingTerminals.current.delete(tmuxName);
-    }
-  }, [openTerminals]);
-
-  const handleTerminalActivity = useCallback((sessionId: string) => {
-    if (sessionId !== activeTerminalId) {
-      setUnreadSessions((prev) => new Set(prev).add(sessionId));
-    }
-  }, [activeTerminalId]);
-
-  const openTerminalForSprint = useCallback(async (name: string, cwd: string, tmuxSession?: string) => {
-    const lookupName = tmuxSession || name;
-    const existing = openTerminals.find((t) => t.tmuxName === lookupName);
-    if (existing) {
-      setActiveTerminalId(existing.id);
-      setActiveView(null);
-      setUnreadSessions((prev) => { const n = new Set(prev); n.delete(existing.id); return n; });
-      return;
-    }
-    if (openingTerminals.current.has(lookupName)) return;
-    openingTerminals.current.add(lookupName);
-    try {
-      const body: Record<string, string> = { name, cwd };
-      if (tmuxSession) body.tmuxSession = tmuxSession;
-      const res = await fetch('/api/sessions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (res.ok) {
-        const s = await res.json();
-        setOpenTerminals((prev) => [...prev, { id: s.id, name, tmuxName: lookupName }]);
-        setActiveTerminalId(s.id);
-        setActiveView(null);
-      }
-    } catch { /* ignore */ } finally {
-      openingTerminals.current.delete(lookupName);
-    }
-  }, [openTerminals]);
+  // --- Actions ---
 
   const ACTION_TOAST_DURATION_MS = 3_500;
 
@@ -359,7 +171,6 @@ export function MissionControl() {
     return data;
   }
 
-  /** Send a skill command to a sprint's tmux session and advance its phase. */
   const handleSprintAction = useCallback(async (
     projectId: string, feature: string, command: string, toPhase: string,
   ) => {
@@ -393,7 +204,7 @@ export function MissionControl() {
   const handleSelectView = useCallback((view: View) => {
     setActiveView(view);
     setActiveTerminalId(null);
-  }, []);
+  }, [setActiveTerminalId]);
 
   // --- Render ---
 
@@ -428,7 +239,6 @@ export function MissionControl() {
       />
 
       <main className="mc-content">
-        {/* Pipeline Board view (default) */}
         {!showingTerminal && activeView === 'board' && (
           <PipelineBoard
             columns={columns}
@@ -462,7 +272,6 @@ export function MissionControl() {
           />
         )}
 
-        {/* Legacy dashboard view */}
         {!showingTerminal && activeView === 'dashboard' && (
           <div className="dashboard-content">
             {!data && <p className="empty">Loading...</p>}
@@ -497,15 +306,9 @@ export function MissionControl() {
           </div>
         )}
 
-        {/* Analytics view */}
         {!showingTerminal && activeView === 'analytics' && <AnalyticsTab />}
+        {!showingTerminal && activeView === 'settings' && <SettingsPage />}
 
-        {/* Settings view */}
-        {!showingTerminal && activeView === 'settings' && (
-          <SettingsPage />
-        )}
-
-        {/* Terminal panels — all stay mounted, only active is visible */}
         {openTerminals.map((term) => (
           <TerminalPanel
             key={term.id}
@@ -516,7 +319,6 @@ export function MissionControl() {
         ))}
       </main>
 
-      {/* Command Palette (Cmd+K) */}
       {showCommandPalette && (
         <CommandPalette
           sprints={allSprints}
@@ -525,7 +327,6 @@ export function MissionControl() {
         />
       )}
 
-      {/* Modals */}
       {newSprintProject !== null && data && (
         <NewSprintDialog
           projects={data.projects.map((p) => ({ id: p.id, path: p.path, stack: p.stack }))}

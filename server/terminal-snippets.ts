@@ -1,5 +1,5 @@
 import { type Express, type Request, type Response } from 'express';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { getSprintSessions } from './tmux-detect.js';
 
 interface SnippetClient {
@@ -14,8 +14,8 @@ let pollInterval: ReturnType<typeof setInterval> | null = null;
 /** Capture last N lines from a tmux pane. Returns empty array on failure. */
 function capturePane(tmuxSession: string, lines: number = 3): string[] {
   try {
-    const raw = execSync(
-      `tmux capture-pane -t "${tmuxSession}" -p -S -${lines} 2>/dev/null`,
+    const raw = execFileSync(
+      'tmux', ['capture-pane', '-t', tmuxSession, '-p', '-S', `-${lines}`],
       { encoding: 'utf-8', timeout: 2000 },
     );
     return raw

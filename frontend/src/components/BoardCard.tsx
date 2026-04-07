@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import type { BoardSprint } from '../hooks/use-board';
 import { getHealth, getProjectColor, HEALTH_COLORS, nextAction, timeAgo } from '../utils/sprint-health';
@@ -9,6 +9,7 @@ interface Props {
   onOpenTerminal?: (name: string, cwd: string, tmuxSession?: string) => void;
   onSelect?: () => void;
   selected?: boolean;
+  focused?: boolean;
   terminalSnippet?: string[];
   onAction?: (command: string, toPhase: string) => Promise<void>;
 }
@@ -71,11 +72,16 @@ function TimeInPhase({ since }: { since: string }) {
   return text ? <span className="board-card-time">{text}</span> : null;
 }
 
-export function BoardCard({ sprint, onOpenTerminal, onSelect, selected, terminalSnippet, onAction }: Props) {
+export function BoardCard({ sprint, onOpenTerminal, onSelect, selected, focused, terminalSnippet, onAction }: Props) {
   const health: Health = getHealth(sprint);
   const healthColor = HEALTH_COLORS[health];
   const projectColor = getProjectColor(sprint.projectId);
   const isActive = sprint.tmux_active;
+
+  // Scroll focused card into view
+  const cardRef = useCallback((node: HTMLDivElement | null) => {
+    if (node && focused) node.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [focused]);
 
   const action = getPhaseAction(sprint.phase, sprint.chain_status.qa_required);
   const isShip = action?.toPhase === 'SHIP';
@@ -113,9 +119,10 @@ export function BoardCard({ sprint, onOpenTerminal, onSelect, selected, terminal
 
   return (
     <motion.div
+      ref={cardRef}
       layout
       layoutId={`${sprint.projectId}-${sprint.feature}`}
-      className={`board-card board-card--${health}${isActive ? ' board-card--active' : ''}${selected ? ' board-card--selected' : ''}`}
+      className={`board-card board-card--${health}${isActive ? ' board-card--active' : ''}${selected ? ' board-card--selected' : ''}${focused ? ' board-card--focused' : ''}`}
       style={{ borderLeftColor: projectColor }}
       onClick={onSelect}
       initial={{ opacity: 0, scale: 0.95 }}

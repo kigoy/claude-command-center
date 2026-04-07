@@ -8,6 +8,7 @@ interface Props {
   doneCount: number;
   showDone: boolean;
   onToggleDone: () => void;
+  focusedIndex?: number | null;
   selectedSprint?: string | null;
   onSelectSprint?: (key: string | null) => void;
   onOpenTerminal?: (name: string, cwd: string, tmuxSession?: string) => void;
@@ -29,15 +30,22 @@ export function PipelineBoard({
   doneCount,
   showDone,
   onToggleDone,
+  focusedIndex,
   selectedSprint,
   onSelectSprint,
   onOpenTerminal,
   terminalSnippets,
   onAction,
 }: Props) {
+  // Build a running offset so each column knows its flat-index start
+  let flatOffset = 0;
+
   return (
     <div className="pipeline-board">
-      {columns.map((col) => (
+      {columns.map((col) => {
+        const colOffset = flatOffset;
+        flatOffset += col.sprints.length;
+        return (
         <div key={col.phase} className="phase-column">
           <div className="phase-column-header">
             <span className="phase-column-title">
@@ -47,13 +55,15 @@ export function PipelineBoard({
           </div>
           <div className="phase-column-cards">
             <AnimatePresence mode="popLayout">
-              {col.sprints.map((sprint) => {
+              {col.sprints.map((sprint, i) => {
                 const key = `${sprint.projectId}-${sprint.feature}`;
+                const isFocused = focusedIndex != null && focusedIndex === colOffset + i;
                 return (
                   <BoardCard
                     key={key}
                     sprint={sprint}
                     selected={selectedSprint === key}
+                    focused={isFocused}
                     onSelect={() => onSelectSprint?.(selectedSprint === key ? null : key)}
                     onOpenTerminal={onOpenTerminal}
                     terminalSnippet={terminalSnippets?.get(key)}
@@ -69,7 +79,8 @@ export function PipelineBoard({
             )}
           </div>
         </div>
-      ))}
+        );
+      })}
 
       {/* DONE toggle (shown when COMPLETE column is hidden) */}
       {!showDone && doneCount > 0 && (

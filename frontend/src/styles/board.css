@@ -136,6 +136,13 @@
   box-shadow: 0 0 0 1px var(--accent), 0 4px 16px rgba(108, 99, 255, 0.2);
 }
 
+/* Keyboard focus ring */
+.board-card--focused {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 1px var(--accent), 0 0 12px rgba(108, 99, 255, 0.25);
+}
+
 /* Pulsing border for active sessions */
 .board-card--active {
   animation: card-pulse 2s ease-in-out infinite;

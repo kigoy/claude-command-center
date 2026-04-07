@@ -36,6 +36,128 @@ export function MissionControl() {
   const openingTerminals = useRef(new Set<string>());
 
   const { columns, allSprints, doneCount, showDone, setShowDone } = useBoard(data);
+  const [focusedCardIndex, setFocusedCardIndex] = useState<number | null>(null);
+
+  // Total card count across all visible columns (flat index)
+  const totalCards = columns.reduce((n, col) => n + col.sprints.length, 0);
+
+  // --- Keyboard navigation ---
+
+  useEffect(() => {
+    function handleBoardKeys(e: KeyboardEvent) {
+      // Only active on board view, not in terminal
+      if (activeView !== 'board' || activeTerminalId !== null) {
+        // Esc from terminal returns to board
+        if (e.key === 'Escape' && activeTerminalId !== null) {
+          e.preventDefault();
+          setActiveTerminalId(null);
+          setActiveView('board');
+        }
+        return;
+      }
+      if (totalCards === 0) return;
+
+      // Resolve flat index to {columnIndex, cardIndexInColumn}
+      function resolve(flat: number) {
+        let remaining = flat;
+        for (let ci = 0; ci < columns.length; ci++) {
+          if (remaining < columns[ci].sprints.length) return { ci, ri: remaining };
+          remaining -= columns[ci].sprints.length;
+        }
+        return { ci: 0, ri: 0 };
+      }
+
+      // Build flat index from column + row
+      function flatten(ci: number, ri: number): number {
+        let idx = 0;
+        for (let c = 0; c < ci; c++) idx += columns[c].sprints.length;
+        return idx + ri;
+      }
+
+      const current = focusedCardIndex ?? -1;
+
+      switch (e.key) {
+        case 'ArrowRight': {
+          e.preventDefault();
+          if (current < 0) { setFocusedCardIndex(0); return; }
+          const { ci, ri } = resolve(current);
+          for (let next = ci + 1; next < columns.length; next++) {
+            if (columns[next].sprints.length > 0) {
+              const row = Math.min(ri, columns[next].sprints.length - 1);
+              setFocusedCardIndex(flatten(next, row));
+              return;
+            }
+          }
+          break;
+        }
+        case 'ArrowLeft': {
+          e.preventDefault();
+          if (current < 0) { setFocusedCardIndex(0); return; }
+          const { ci, ri } = resolve(current);
+          for (let prev = ci - 1; prev >= 0; prev--) {
+            if (columns[prev].sprints.length > 0) {
+              const row = Math.min(ri, columns[prev].sprints.length - 1);
+              setFocusedCardIndex(flatten(prev, row));
+              return;
+            }
+          }
+          break;
+        }
+        case 'ArrowDown': {
+          e.preventDefault();
+          if (current < 0) { setFocusedCardIndex(0); return; }
+          const { ci, ri } = resolve(current);
+          if (ri + 1 < columns[ci].sprints.length) {
+            setFocusedCardIndex(flatten(ci, ri + 1));
+          }
+          break;
+        }
+        case 'ArrowUp': {
+          e.preventDefault();
+          if (current < 0) { setFocusedCardIndex(0); return; }
+          const { ci, ri } = resolve(current);
+          if (ri - 1 >= 0) {
+            setFocusedCardIndex(flatten(ci, ri - 1));
+          }
+          break;
+        }
+        case 'Tab': {
+          e.preventDefault();
+          const next = current < 0 ? 0 : (current + (e.shiftKey ? -1 : 1) + totalCards) % totalCards;
+          setFocusedCardIndex(next);
+          break;
+        }
+        case 'Enter': {
+          if (current >= 0) {
+            e.preventDefault();
+            let idx = current;
+            for (const col of columns) {
+              if (idx < col.sprints.length) {
+                const sprint = col.sprints[idx];
+                openTerminalForSprint(
+                  `${sprint.projectId}/${sprint.feature}`,
+                  sprint.projectPath,
+                  sprint.tmux_session || undefined,
+                );
+                break;
+              }
+              idx -= col.sprints.length;
+            }
+          }
+          break;
+        }
+        case 'Escape': {
+          e.preventDefault();
+          setFocusedCardIndex(null);
+          break;
+        }
+        default:
+          return;
+      }
+    }
+    document.addEventListener('keydown', handleBoardKeys);
+    return () => document.removeEventListener('keydown', handleBoardKeys);
+  }, [activeView, activeTerminalId, focusedCardIndex, totalCards, columns, openTerminalForSprint]);
 
   // --- Data fetching ---
 
@@ -297,6 +419,7 @@ export function MissionControl() {
             doneCount={doneCount}
             showDone={showDone}
             onToggleDone={() => setShowDone(!showDone)}
+            focusedIndex={focusedCardIndex}
             selectedSprint={selectedSprint}
             onSelectSprint={(key) => {
               setSelectedSprint(key);

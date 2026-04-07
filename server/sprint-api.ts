@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { readdirSync, readFileSync, existsSync, mkdirSync, writeFileSync, statSync, unlinkSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
 import { getProjects, getGroups, addProject, updateProjectPath } from './sprint-config.js';
@@ -12,6 +13,7 @@ import { buildAnalytics } from './sprint-analytics.js';
 import { suggestSkills } from './sprint-suggestions.js';
 import { getSprintSessions } from './tmux-detect.js';
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const router = Router();
 
 /** Get the most recent timestamp from phase history, falling back to created date. */
@@ -773,6 +775,136 @@ router.post('/explore-idea', (req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// --- Settings API (Phase 6 Atom 5) ---
+
+// Env vars exposed to the settings UI (never expose secrets)
+const SETTINGS_ALLOWLIST = ['NTFY_URL', 'NTFY_TOPIC', 'NTFY_ENABLED', 'BASE_URL', 'PORT'] as const;
+const SETTINGS_SECRETS = ['AUTH_PASSPHRASE', 'AUTH_SECRET', 'NTFY_AUTH_TOKEN', 'COOKIE_MAX_AGE_HOURS'];
+
+router.get('/settings', (_req, res) => {
+  const settings: Record<string, string> = {};
+  for (const key of SETTINGS_ALLOWLIST) {
+    settings[key] = process.env[key] || '';
+  }
+  res.json(settings);
+});
+
+router.patch('/settings', (req, res) => {
+  const updates = req.body as Record<string, string>;
+  if (!updates || typeof updates !== 'object') {
+    res.status(400).json({ error: 'Body must be a JSON object' });
+    return;
+  }
+
+  // Block secret keys
+  for (const key of Object.keys(updates)) {
+    if (SETTINGS_SECRETS.includes(key)) {
+      res.status(403).json({ error: `Cannot modify ${key} via API` });
+      return;
+    }
+    if (!SETTINGS_ALLOWLIST.includes(key as any)) {
+      res.status(400).json({ error: `Unknown setting: ${key}` });
+      return;
+    }
+  }
+
+  // Update in-memory env
+  for (const [key, value] of Object.entries(updates)) {
+    process.env[key] = value;
+  }
+
+  // Persist to .env file
+  try {
+    const envPath = join(__dirname, '..', '.env');
+    let envContent = '';
+    if (existsSync(envPath)) {
+      envContent = readFileSync(envPath, 'utf-8');
+    }
+    for (const [key, value] of Object.entries(updates)) {
+      const regex = new RegExp(`^${key}=.*$`, 'm');
+      if (regex.test(envContent)) {
+        envContent = envContent.replace(regex, `${key}=${value}`);
+      } else {
+        envContent += `\n${key}=${value}`;
+      }
+    }
+    writeFileSync(envPath, envContent.trimStart());
+    res.json({ ok: true, applied: updates });
+  } catch (err: any) {
+    // In-memory update succeeded, .env write failed
+    res.status(500).json({ error: `Settings applied in memory but .env write failed: ${err.message}` });
+  }
+});
+
+// --- Alerts API (Phase 6 Atom 4) ---
+
+router.get('/alerts', (_req, res) => {
+  const alerts: Array<{ type: string; message: string; sprintKey: string; severity: string; source: string; timestamp: string }> = [];
+  const now = Date.now();
+  const STALE_THRESHOLD_MS = 4 * 3600 * 1000; // 4 hours
+
+  try {
+    const projects = getProjects();
+    for (const project of projects) {
+      const sprintsDir = join(project.path, '.sprints');
+      if (!existsSync(sprintsDir)) continue;
+
+      let entries;
+      try { entries = readdirSync(sprintsDir, { withFileTypes: true }); } catch { continue; }
+
+      for (const entry of entries) {
+        if (!entry.isDirectory() || entry.name.startsWith('_')) continue;
+        let state: SprintState | null;
+        try { state = readSprintState(join(sprintsDir, entry.name)); } catch { continue; }
+        if (!state || state.phase === 'COMPLETE') continue;
+
+        const key = `${project.id}-${state.feature}`;
+        const lastActivity = getLastActivity(state);
+        const lastMs = new Date(lastActivity).getTime();
+
+        if (state.blocked) {
+          alerts.push({
+            type: 'blocked',
+            message: `${project.id}/${state.feature.replace(/^feat-/, '')} is blocked: ${state.blocked_reason || 'no reason given'}`,
+            sprintKey: key,
+            severity: 'high',
+            source: 'sprint',
+            timestamp: new Date().toISOString(),
+          });
+        } else if (now - lastMs > STALE_THRESHOLD_MS) {
+          const hours = Math.round((now - lastMs) / 3600000);
+          alerts.push({
+            type: 'stale',
+            message: `${project.id}/${state.feature.replace(/^feat-/, '')} has been idle for ${hours}h in ${state.phase}`,
+            sprintKey: key,
+            severity: 'medium',
+            source: 'sprint',
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+    }
+  } catch { /* ignore read errors */ }
+
+  res.json(alerts);
+});
+
+// --- Archive API (Phase 6 Atom 2) ---
+
+router.post('/sprints/:projectId/:featureId/archive', (req, res) => {
+  const { projectId, featureId } = req.params;
+  const project = getProjects().find((p) => p.id === projectId);
+  if (!project) { res.status(404).json({ error: 'Project not found' }); return; }
+
+  const sprintDir = join(project.path, '.sprints', featureId);
+  const state = readSprintState(sprintDir);
+  if (!state) { res.status(404).json({ error: 'Sprint not found' }); return; }
+  if (state.phase !== 'COMPLETE') { res.status(400).json({ error: 'Can only archive COMPLETE sprints' }); return; }
+
+  writeSprintState(sprintDir, { ...state, archived: true } as any);
+  res.json({ ok: true, archived: true });
 });
 
 export default router;

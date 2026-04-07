@@ -1924,3 +1924,82 @@ textarea:focus {
     padding: 0.5rem;
   }
 }
+
+/* --- Light Theme (Phase 6 Atom 5) --- */
+[data-theme="light"] {
+  --bg: #f5f5f7;
+  --surface: #ffffff;
+  --border: #d0d0d8;
+  --text: #1a1a2e;
+  --text-dim: #6666880;
+  --accent: #5a52e0;
+  --accent-hover: #4840c8;
+  --danger: #d32f2f;
+}
+
+/* --- Alert Banner (Phase 6 Atom 4) --- */
+.alert-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 1rem;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+.alert-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  animation: alert-slide 0.3s ease;
+}
+.alert-item--high { background: rgba(244, 67, 54, 0.15); color: #f44336; }
+.alert-item--medium { background: rgba(255, 152, 0, 0.15); color: #ff9800; }
+.alert-icon { font-size: 1rem; }
+.alert-message { flex: 1; }
+.alert-dismiss {
+  background: none; border: none; color: inherit; cursor: pointer;
+  font-size: 1.2rem; opacity: 0.6; padding: 0 4px;
+}
+.alert-dismiss:hover { opacity: 1; }
+@keyframes alert-slide {
+  from { transform: translateY(-10px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* --- Settings Page (Phase 6 Atom 5) --- */
+.mc-settings { padding: 2rem; max-width: 600px; }
+.mc-settings h2 { margin-bottom: 1.5rem; color: var(--text); }
+.mc-settings h3 { color: var(--text-dim); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.75rem; }
+.settings-section { margin-bottom: 2rem; }
+.settings-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.5rem 0; border-bottom: 1px solid var(--border);
+}
+.settings-row span:first-child { color: var(--text); font-size: 0.9rem; }
+.settings-row select, .settings-row input {
+  background: var(--surface); border: 1px solid var(--border); color: var(--text);
+  padding: 4px 8px; border-radius: 4px; font-size: 0.85rem;
+}
+.settings-input-group { display: flex; gap: 6px; align-items: center; }
+.settings-save-btn {
+  background: var(--accent); color: white; border: none; border-radius: 4px;
+  padding: 4px 10px; font-size: 0.8rem; cursor: pointer;
+}
+.settings-save-btn:hover { background: var(--accent-hover); }
+.settings-value { color: var(--text-dim); font-size: 0.85rem; }
+.settings-toast {
+  background: var(--accent); color: white; padding: 6px 16px;
+  border-radius: 6px; font-size: 0.85rem; margin-bottom: 1rem;
+  display: inline-block;
+}
+
+/* --- Ship Counter (Phase 6 Atom 7) --- */
+.ship-counter {
+  padding: 0.75rem 1rem; border-top: 1px solid var(--border);
+  font-size: 0.8rem; color: var(--text-dim); text-align: center;
+}
+.ship-counter strong { color: var(--text); font-size: 1.1rem; }

@@ -42,6 +42,8 @@ interface SprintSummary {
   tmux_active: boolean;
   chain_status: ChainStatus;
   suggestions: string[];
+  created: string;
+  phase_history: Array<{ phase?: string; entered?: string; exited?: string }>;
 }
 
 interface ProjectSummary {
@@ -135,6 +137,10 @@ function listSprintsForProject(
           last_activity: lastActivity,
           has_ui: hasUi,
         }),
+        created: state.created,
+        phase_history: (state.phase_history as Array<{ phase?: string; entered?: string; exited?: string }>).map(
+          (e) => ({ phase: e.phase, entered: e.entered, exited: e.exited }),
+        ),
       });
     }
   } catch {

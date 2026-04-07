@@ -21,6 +21,8 @@ export interface SprintSummary {
   tmux_active: boolean;
   chain_status: ChainStatus;
   suggestions?: string[];
+  created: string;
+  phase_history: Array<{ phase?: string; entered?: string; exited?: string }>;
 }
 
 export interface ProjectSummary {

@@ -56,6 +56,58 @@ function AtomRing({ completed, total }: { completed: number; total: number }) {
   );
 }
 
+const PHASE_COLORS: Record<string, string> = {
+  PLAN: '#9c27b0',
+  BUILD: '#2196f3',
+  REVIEW: '#ff9800',
+  QA: '#e91e63',
+  SHIP: '#4caf50',
+};
+
+function formatDuration(ms: number): string {
+  if (ms < 0) return '0m';
+  const mins = Math.floor(ms / 60000);
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  const rem = mins % 60;
+  if (hrs < 24) return rem > 0 ? `${hrs}h ${rem}m` : `${hrs}h`;
+  const days = Math.floor(hrs / 24);
+  const remHrs = hrs % 24;
+  return remHrs > 0 ? `${days}d ${remHrs}h` : `${days}d`;
+}
+
+interface PhaseBar {
+  phase: string;
+  durationMs: number;
+  color: string;
+  label: string;
+  isCurrent: boolean;
+}
+
+function buildPhaseBars(
+  phaseHistory: Array<{ phase?: string; entered?: string; exited?: string }>,
+): PhaseBar[] {
+  const now = Date.now();
+  return phaseHistory
+    .filter((e) => e.phase && e.entered)
+    .map((e) => {
+      const entered = new Date(e.entered!).getTime();
+      if (isNaN(entered)) return null;
+      const isCurrent = !e.exited;
+      const exited = isCurrent ? now : new Date(e.exited!).getTime();
+      if (isNaN(exited)) return null;
+      const durationMs = Math.max(0, exited - entered);
+      return {
+        phase: e.phase!,
+        durationMs,
+        color: PHASE_COLORS[e.phase!] ?? 'var(--border)',
+        label: `${e.phase}: ${formatDuration(durationMs)}`,
+        isCurrent,
+      } as PhaseBar;
+    })
+    .filter(Boolean) as PhaseBar[];
+}
+
 function TimeInPhase({ since }: { since: string }) {
   const [text, setText] = useState('');
   useEffect(() => {
@@ -72,6 +124,58 @@ function TimeInPhase({ since }: { since: string }) {
   return text ? <span className="board-card-time">{text}</span> : null;
 }
 
+function BoardCardTimeline({ phaseHistory, created, isComplete }: {
+  phaseHistory: Array<{ phase?: string; entered?: string; exited?: string }>;
+  created: string;
+  isComplete: boolean;
+}) {
+  const bars = buildPhaseBars(phaseHistory);
+  if (bars.length === 0) return null;
+
+  const totalMs = bars.reduce((sum, b) => sum + b.durationMs, 0);
+  if (totalMs === 0) return null;
+
+  // Cycle time: created → now (or last exited for COMPLETE)
+  const createdMs = new Date(created).getTime();
+  let cycleEnd = Date.now();
+  if (isComplete) {
+    const lastExited = phaseHistory.filter((e) => e.exited).pop();
+    if (lastExited?.exited) {
+      const t = new Date(lastExited.exited).getTime();
+      if (!isNaN(t)) cycleEnd = t;
+    }
+  }
+  const cycleMs = isNaN(createdMs) ? 0 : Math.max(0, cycleEnd - createdMs);
+
+  return (
+    <div className="board-card-timeline">
+      <div className="board-card-timeline-bars">
+        {bars.map((bar, i) => (
+          <div
+            key={i}
+            className={`board-card-timeline-bar${bar.isCurrent ? ' board-card-timeline-bar--active' : ''}`}
+            style={{
+              width: `${Math.max(4, (bar.durationMs / totalMs) * 100)}%`,
+              backgroundColor: bar.color,
+            }}
+            title={bar.label}
+          />
+        ))}
+      </div>
+      <div className="board-card-timeline-legend">
+        {bars.map((bar, i) => (
+          <span key={i} className="board-card-timeline-phase" style={{ color: bar.color }}>
+            {bar.phase}
+          </span>
+        ))}
+        <span className="board-card-timeline-cycle">
+          {formatDuration(cycleMs)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export function BoardCard({ sprint, onOpenTerminal, onSelect, selected, focused, terminalSnippet, onAction }: Props) {
   const health: Health = getHealth(sprint);
   const healthColor = HEALTH_COLORS[health];
@@ -82,6 +186,8 @@ export function BoardCard({ sprint, onOpenTerminal, onSelect, selected, focused,
   const cardRef = useCallback((node: HTMLDivElement | null) => {
     if (node && focused) node.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [focused]);
+
+  const [showTimeline, setShowTimeline] = useState(false);
 
   const action = getPhaseAction(sprint.phase, sprint.chain_status.qa_required);
   const isShip = action?.toPhase === 'SHIP';
@@ -141,8 +247,11 @@ export function BoardCard({ sprint, onOpenTerminal, onSelect, selected, focused,
 
       <h4 className="board-card-feature">{sprint.feature.replace(/^feat-/, '')}</h4>
 
-      {/* Atom ring + info */}
-      <div className="board-card-body">
+      {/* Atom ring + info — click toggles timeline */}
+      <div
+        className="board-card-body"
+        onClick={(e) => { e.stopPropagation(); setShowTimeline((v) => !v); }}
+      >
         {sprint.has_atoms && sprint.atoms_total > 0 && (
           <AtomRing completed={sprint.atoms_completed} total={sprint.atoms_total} />
         )}
@@ -154,6 +263,15 @@ export function BoardCard({ sprint, onOpenTerminal, onSelect, selected, focused,
           </div>
         </div>
       </div>
+
+      {/* Phase timeline bars */}
+      {showTimeline && sprint.phase_history && sprint.phase_history.length > 0 && (
+        <BoardCardTimeline
+          phaseHistory={sprint.phase_history}
+          created={sprint.created}
+          isComplete={sprint.phase === 'COMPLETE'}
+        />
+      )}
 
       {/* Terminal mini-preview */}
       {terminalSnippet && terminalSnippet.length > 0 && (

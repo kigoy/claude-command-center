@@ -37,7 +37,7 @@ export function MissionControl() {
   const failCount = useRef(0);
   const openingTerminals = useRef(new Set<string>());
 
-  const { columns, allSprints, doneCount, showDone, setShowDone } = useBoard(data);
+  const { columns, allSprints, doneCount, showDone, setShowDone, filter, setFilter, projectIds } = useBoard(data);
   const [focusedCardIndex, setFocusedCardIndex] = useState<number | null>(null);
 
   // Total card count across all visible columns (flat index)
@@ -422,6 +422,9 @@ export function MissionControl() {
             doneCount={doneCount}
             showDone={showDone}
             onToggleDone={() => setShowDone(!showDone)}
+            filter={filter}
+            onFilterChange={setFilter}
+            projectIds={projectIds}
             focusedIndex={focusedCardIndex}
             selectedSprint={selectedSprint}
             onSelectSprint={(key) => {

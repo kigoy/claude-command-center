@@ -27,8 +27,14 @@ function sortByActivity(a: BoardSprint, b: BoardSprint): number {
   return activityScore(a) - activityScore(b);
 }
 
+export type BoardFilter = {
+  project?: string;
+  health?: string;
+};
+
 export function useBoard(data: DashboardData | null) {
   const [showDone, setShowDone] = useState(false);
+  const [filter, setFilter] = useState<BoardFilter>({});
 
   const allSprints = useMemo<BoardSprint[]>(() => {
     if (!data) return [];
@@ -41,14 +47,23 @@ export function useBoard(data: DashboardData | null) {
     );
   }, [data]);
 
+  const filteredSprints = useMemo(() => {
+    return allSprints.filter((s) => {
+      if (filter.project && s.projectId !== filter.project) return false;
+      if (filter.health && getHealth(s) !== filter.health) return false;
+      if ((s as any).archived && !showDone) return false;
+      return true;
+    });
+  }, [allSprints, filter, showDone]);
+
   const columns = useMemo<PhaseColumn[]>(() => {
     return PHASE_ORDER.map((phase) => ({
       phase,
-      sprints: allSprints
+      sprints: filteredSprints
         .filter((s) => s.phase === phase)
         .sort(sortByActivity),
     }));
-  }, [allSprints]);
+  }, [filteredSprints]);
 
   const visibleColumns = useMemo(() => {
     if (showDone) return columns;
@@ -59,5 +74,10 @@ export function useBoard(data: DashboardData | null) {
     return columns.find((c) => c.phase === 'COMPLETE')?.sprints.length ?? 0;
   }, [columns]);
 
-  return { columns: visibleColumns, allSprints, doneCount, showDone, setShowDone };
+  const projectIds = useMemo(() => {
+    const ids = new Set(allSprints.map((s) => s.projectId));
+    return [...ids].sort();
+  }, [allSprints]);
+
+  return { columns: visibleColumns, allSprints, doneCount, showDone, setShowDone, filter, setFilter, projectIds };
 }

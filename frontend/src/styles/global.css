@@ -1925,6 +1925,58 @@ textarea:focus {
   }
 }
 
+/* --- Mobile: full collapse + bottom nav (Phase 6 Atom 6) --- */
+@media (max-width: 480px) {
+  .mission-control {
+    flex-direction: column;
+  }
+  .mc-sidebar {
+    width: 100%;
+    min-width: unset;
+    height: 48px;
+    flex-direction: row;
+    order: 1;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    z-index: 100;
+    overflow: hidden;
+    border-top: 1px solid var(--border);
+    border-right: none;
+  }
+  .mc-sidebar-header,
+  .mc-section-title,
+  .mc-session-label,
+  .mc-group-label,
+  .mc-project-name,
+  .mc-project-sprint-btn,
+  .mc-sidebar-btn,
+  .mc-sidebar-footer,
+  .mc-sidebar-projects,
+  .mc-sidebar-sessions {
+    display: none;
+  }
+  .mc-sidebar-nav {
+    flex-direction: row;
+    justify-content: space-around;
+    width: 100%;
+    padding: 0;
+  }
+  .mc-nav-item {
+    padding: 0.75rem;
+    min-width: 48px;
+    min-height: 48px;
+    justify-content: center;
+  }
+  .mc-content {
+    padding-bottom: 56px;
+    width: 100%;
+  }
+  .mc-terminal {
+    height: calc(100vh - 56px);
+  }
+}
+
 /* --- Light Theme (Phase 6 Atom 5) --- */
 [data-theme="light"] {
   --bg: #f5f5f7;

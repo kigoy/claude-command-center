@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { DashboardData, GroupConfig, ProjectSummary, TmuxSession } from '../types';
 
 export interface OpenTerminal {
@@ -92,6 +92,8 @@ export function Sidebar({
         ))}
       </div>
 
+      <ShipCounter projects={projects} />
+
       <button className="mc-sidebar-btn mc-sidebar-btn--secondary" onClick={onAddProject}>
         + Add Project
       </button>
@@ -142,6 +144,35 @@ function SidebarGroup({ group, projects, onNewSprint }: {
           </button>
         </div>
       ))}
+    </div>
+  );
+}
+
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+function ShipCounter({ projects }: { projects: ProjectSummary[] }) {
+  const { thisWeek, allTime } = useMemo(() => {
+    const now = Date.now();
+    let week = 0;
+    let total = 0;
+    for (const project of projects) {
+      for (const sprint of project.sprints) {
+        if (sprint.phase !== 'COMPLETE') continue;
+        total++;
+        const activityMs = new Date(sprint.last_activity).getTime();
+        if (now - activityMs <= SEVEN_DAYS_MS) {
+          week++;
+        }
+      }
+    }
+    return { thisWeek: week, allTime: total };
+  }, [projects]);
+
+  return (
+    <div className="mc-sidebar-section mc-ship-counter">
+      <span className="mc-ship-counter-text">
+        {thisWeek} shipped this week / {allTime} all-time
+      </span>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import type { BoardSprint } from '../hooks/use-board';
 import { getHealth, getProjectColor, HEALTH_COLORS, nextAction, timeAgo } from '../utils/sprint-health';
@@ -10,6 +10,25 @@ interface Props {
   onSelect?: () => void;
   selected?: boolean;
   terminalSnippet?: string[];
+  onAction?: (command: string, toPhase: string) => Promise<void>;
+}
+
+interface PhaseAction {
+  command: string;
+  label: string;
+  toPhase: string;
+}
+
+/** Returns the next actionable skill command for a sprint phase, or null if none. */
+function getPhaseAction(phase: string, qaRequired: boolean): PhaseAction | null {
+  switch (phase) {
+    case 'BUILD': return { command: '/review', label: '→ /review', toPhase: 'REVIEW' };
+    case 'REVIEW': return qaRequired
+      ? { command: '/qa', label: '→ /qa', toPhase: 'QA' }
+      : { command: '/ship', label: '→ /ship', toPhase: 'SHIP' };
+    case 'QA': return { command: '/ship', label: '→ /ship', toPhase: 'SHIP' };
+    default: return null;
+  }
 }
 
 function AtomRing({ completed, total }: { completed: number; total: number }) {
@@ -52,17 +71,44 @@ function TimeInPhase({ since }: { since: string }) {
   return text ? <span className="board-card-time">{text}</span> : null;
 }
 
-export function BoardCard({ sprint, onOpenTerminal, onSelect, selected, terminalSnippet }: Props) {
+export function BoardCard({ sprint, onOpenTerminal, onSelect, selected, terminalSnippet, onAction }: Props) {
   const health: Health = getHealth(sprint);
   const healthColor = HEALTH_COLORS[health];
   const projectColor = getProjectColor(sprint.projectId);
   const isActive = sprint.tmux_active;
+
+  const action = getPhaseAction(sprint.phase, sprint.chain_status.qa_required);
+  const isShip = action?.toPhase === 'SHIP';
+  const [confirmingShip, setConfirmingShip] = useState(false);
+  const [actionPending, setActionPending] = useState(false);
+  const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Auto-cancel ship confirm after 5s with no second click
+  const SHIP_CONFIRM_TIMEOUT_MS = 5_000;
+  useEffect(() => {
+    if (!confirmingShip) return;
+    confirmTimer.current = setTimeout(() => setConfirmingShip(false), SHIP_CONFIRM_TIMEOUT_MS);
+    return () => { if (confirmTimer.current) clearTimeout(confirmTimer.current); };
+  }, [confirmingShip]);
 
   function handleTerminal(e: React.MouseEvent) {
     e.stopPropagation();
     if (!onOpenTerminal) return;
     const name = `${sprint.projectId}/${sprint.feature}`;
     onOpenTerminal(name, sprint.projectPath, sprint.tmux_session || undefined);
+  }
+
+  function handleAction(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!action || !onAction || actionPending) return;
+    // /ship requires a two-click confirm
+    if (isShip && !confirmingShip) {
+      setConfirmingShip(true);
+      return;
+    }
+    setConfirmingShip(false);
+    setActionPending(true);
+    onAction(action.command, action.toPhase).finally(() => setActionPending(false));
   }
 
   return (
@@ -108,6 +154,25 @@ export function BoardCard({ sprint, onOpenTerminal, onSelect, selected, terminal
           {terminalSnippet.map((line, i) => (
             <div key={i} className="board-card-terminal-line">{line}</div>
           ))}
+        </div>
+      )}
+
+      {/* Phase action button */}
+      {action && onAction && (
+        <div className="board-card-footer" onClick={(e) => e.stopPropagation()}>
+          <button
+            className={[
+              'board-card-action-btn',
+              isShip && confirmingShip ? 'board-card-action-btn--confirm' : '',
+              !sprint.tmux_active ? 'board-card-action-btn--disabled' : '',
+              actionPending ? 'board-card-action-btn--pending' : '',
+            ].filter(Boolean).join(' ')}
+            disabled={!sprint.tmux_active || actionPending}
+            title={!sprint.tmux_active ? 'Open terminal first' : undefined}
+            onClick={handleAction}
+          >
+            {actionPending ? '…' : confirmingShip ? 'Confirm ship?' : action.label}
+          </button>
         </div>
       )}
 

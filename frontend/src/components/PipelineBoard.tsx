@@ -12,6 +12,7 @@ interface Props {
   onSelectSprint?: (key: string | null) => void;
   onOpenTerminal?: (name: string, cwd: string, tmuxSession?: string) => void;
   terminalSnippets?: Map<string, string[]>;
+  onAction?: (projectId: string, feature: string, command: string, toPhase: string) => Promise<void>;
 }
 
 const PHASE_LABELS: Record<string, string> = {
@@ -32,6 +33,7 @@ export function PipelineBoard({
   onSelectSprint,
   onOpenTerminal,
   terminalSnippets,
+  onAction,
 }: Props) {
   return (
     <div className="pipeline-board">
@@ -55,6 +57,9 @@ export function PipelineBoard({
                     onSelect={() => onSelectSprint?.(selectedSprint === key ? null : key)}
                     onOpenTerminal={onOpenTerminal}
                     terminalSnippet={terminalSnippets?.get(key)}
+                    onAction={onAction
+                      ? (cmd, toPhase) => onAction(sprint.projectId, sprint.feature, cmd, toPhase)
+                      : undefined}
                   />
                 );
               })}

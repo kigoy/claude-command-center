@@ -166,7 +166,7 @@ function handleWsConnection(ws: WebSocket, sessionId: string) {
 // --- SSE transport (HTTP fallback for bad networks) ---
 
 export function handleTerminalSSE(req: Request, res: Response) {
-  const sessionId = req.params.id;
+  const sessionId = req.params.id as string;
   const cols = parseInt(req.query.cols as string) || 80;
   const rows = parseInt(req.query.rows as string) || 24;
 
@@ -210,7 +210,7 @@ export function handleTerminalSSE(req: Request, res: Response) {
 }
 
 export function handleTerminalInput(req: Request, res: Response) {
-  const sessionId = req.params.id;
+  const sessionId = req.params.id as string;
   const term = activePtys.get(sessionId);
   if (!term) {
     res.status(404).json({ error: 'No active terminal' });

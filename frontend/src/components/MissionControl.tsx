@@ -31,6 +31,7 @@ export function MissionControl() {
   const [selectedSprint, setSelectedSprint] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
   const [terminalSnippets, setTerminalSnippets] = useState<Map<string, string[]>>(new Map());
+  const [actionToast, setActionToast] = useState<{ msg: string; ok: boolean } | null>(null);
   const failCount = useRef(0);
   const openingTerminals = useRef(new Set<string>());
 
@@ -221,6 +222,37 @@ export function MissionControl() {
     }
   }, [openTerminals]);
 
+  const ACTION_TOAST_DURATION_MS = 3_500;
+
+  async function postJson(url: string, body: object) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Request failed');
+    return data;
+  }
+
+  /** Send a skill command to a sprint's tmux session and advance its phase. */
+  const handleSprintAction = useCallback(async (
+    projectId: string, feature: string, command: string, toPhase: string,
+  ) => {
+    try {
+      await postJson(`/api/sprints/${projectId}/${feature}/exec`, { command });
+      await postJson(`/api/sprints/${projectId}/${feature}/transition`, { to_phase: toPhase });
+      const featureShort = feature.replace(/^feat-/, '');
+      setActionToast({ msg: `Sent ${command} → ${projectId}/${featureShort}`, ok: true });
+      fetchDashboard();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Action failed';
+      setActionToast({ msg, ok: false });
+    } finally {
+      setTimeout(() => setActionToast(null), ACTION_TOAST_DURATION_MS);
+    }
+  }, [fetchDashboard]);
+
   const handleSelectView = useCallback((view: View) => {
     setActiveView(view);
     setActiveTerminalId(null);
@@ -237,6 +269,11 @@ export function MissionControl() {
     <div className="mission-control">
       {offline && <div className="offline-banner">Connection lost — retrying...</div>}
       <UpdateToast />
+      {actionToast && (
+        <div className={`action-toast action-toast--${actionToast.ok ? 'ok' : 'err'}`}>
+          {actionToast.msg}
+        </div>
+      )}
 
       <Sidebar
         data={data}
@@ -278,6 +315,7 @@ export function MissionControl() {
             }}
             onOpenTerminal={openTerminalForSprint}
             terminalSnippets={terminalSnippets}
+            onAction={handleSprintAction}
           />
         )}
 

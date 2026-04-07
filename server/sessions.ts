@@ -61,7 +61,7 @@ export function createSession(
       // Session died — recreate and auto-start claude
       const env = { ...process.env, CLAUDECODE: undefined, CLAUDE_CODE_ENTRYPOINT: undefined };
       execFileSync('tmux', ['new-session', '-d', '-s', opts.tmuxSession, '-c', cwd], {
-        stdio: 'ignore', env: env as Record<string, string>,
+        stdio: 'ignore', env: env as unknown as Record<string, string>,
       });
       execFileSync('tmux', ['send-keys', '-t', opts.tmuxSession, '-l', 'claude --continue'], { stdio: 'ignore' });
       execFileSync('tmux', ['send-keys', '-t', opts.tmuxSession, 'Enter'], { stdio: 'ignore' });

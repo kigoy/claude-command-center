@@ -1242,6 +1242,34 @@ textarea:focus {
   }
 }
 
+/* --- Action feedback toast (sprint command dispatch) --- */
+
+.action-toast {
+  position: fixed;
+  bottom: 5rem; /* above update-toast */
+  right: 1.5rem;
+  border-radius: 6px;
+  padding: 0.45rem 0.8rem;
+  font-size: 0.75rem;
+  font-family: monospace;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 1001;
+  animation: toast-slide-in 0.2s ease-out;
+  pointer-events: none;
+}
+
+.action-toast--ok {
+  background: rgba(76, 175, 80, 0.15);
+  border: 1px solid rgba(76, 175, 80, 0.4);
+  color: #4caf50;
+}
+
+.action-toast--err {
+  background: rgba(244, 67, 54, 0.15);
+  border: 1px solid rgba(244, 67, 54, 0.4);
+  color: #f44336;
+}
+
 /* --- Update toast --- */
 
 .update-toast {

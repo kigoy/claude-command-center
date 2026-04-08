@@ -68,9 +68,11 @@ When a tool asks through the MCP ask-user flow:
 - Mission Control polls `/api/mcp/requests`
 - the frontend shows the current question in a modal
 - the first option is treated as the recommended answer and gets a dedicated fast button
+- when the request belongs to a sprint, the UI can promote that answer into `Use recommended + Auto It`
+- recommended automation state is persisted on the sprint so later MCP questions can be answered automatically
 - responses are posted back through `/api/mcp/respond`
 
-This keeps the interruption loop in the main dashboard instead of forcing the user into terminal transcripts or mobile notification links for every decision.
+This keeps the interruption loop in the main dashboard instead of forcing the user into terminal transcripts or mobile notification links for every decision. When `Auto It` is enabled, Sprint Command also propagates sprint/session metadata through the MCP bridge so recommended answers can be auto-applied only to the correct sprint.
 
 ## Settings behavior
 
@@ -89,4 +91,5 @@ The goal is to keep Sprint Command operationally editable from the app, not from
 - tmux session names use each tool's `sessionPrefix`.
 - Status detection can use tool-specific regex patterns when configured.
 - When no tool-specific detection exists, the backend falls back to generic running/waiting/dead heuristics.
-- Built-in autonomy flags reduce routine approval friction, but real workflow decisions should still flow through the frontend question UI.
+- Built-in autonomy flags reduce routine approval friction.
+- Sprint `Auto It` goes further: it starts the next workflow command for the current phase, keeps taking recommended answers, and auto-queues `/retro` once the sprint reaches `COMPLETE`.

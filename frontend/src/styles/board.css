@@ -194,6 +194,11 @@
   animation: card-pulse 2s ease-in-out infinite;
 }
 
+.board-card-badge--auto {
+  background: rgba(33, 150, 243, 0.16);
+  color: #42a5f5;
+}
+
 /* Feature name */
 .board-card-feature {
   font-size: 0.8rem;

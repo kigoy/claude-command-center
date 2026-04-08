@@ -10,9 +10,10 @@ interface Props {
   onProjectLinked?: () => void;
   onDeleteSprint?: (projectId: string, feature: string) => void;
   onRemixSprint?: (projectId: string, feature: string) => void;
+  onAutoSprint?: (projectId: string, feature: string) => Promise<void>;
 }
 
-export function ProjectGroup({ project, onNewSprint, onOpenTerminal, onProjectLinked, onDeleteSprint, onRemixSprint }: Props) {
+export function ProjectGroup({ project, onNewSprint, onOpenTerminal, onProjectLinked, onDeleteSprint, onRemixSprint, onAutoSprint }: Props) {
   const [showCompleted, setShowCompleted] = useState(false);
   const [showLink, setShowLink] = useState(false);
 
@@ -75,6 +76,7 @@ export function ProjectGroup({ project, onNewSprint, onOpenTerminal, onProjectLi
               onOpenTerminal={onOpenTerminal}
               onDelete={onDeleteSprint}
               onRemix={onRemixSprint}
+              onAuto={onAutoSprint}
             />
           ))}
         </div>
@@ -98,6 +100,7 @@ export function ProjectGroup({ project, onNewSprint, onOpenTerminal, onProjectLi
                   projectPath={project.path}
                   onDelete={onDeleteSprint}
                   onRemix={onRemixSprint}
+                  onAuto={onAutoSprint}
                 />
               ))}
             </div>

@@ -2,8 +2,6 @@ import { Router } from 'express';
 import { readdirSync, readFileSync, existsSync, mkdirSync, writeFileSync, statSync, unlinkSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { tmpdir } from 'os';
-import { execFileSync } from 'child_process';
 import {
   getProjects,
   getGroups,
@@ -21,14 +19,15 @@ import { buildRetroSummary, markRetroRun } from './sprint-retro.js';
 import { buildAnalytics } from './sprint-analytics.js';
 import { suggestSkills } from './sprint-suggestions.js';
 import { getSprintSessions } from './tmux-detect.js';
-import { getCliTool } from './cli-tools.js';
-import { launchToolInTmux, shouldSendPromptOverStdin } from './session-runtime.js';
-import { buildExploreIdeaPrompt, buildSprintBootstrapPrompt, buildSprintCommandPrompt } from './sprint-command-help.js';
+import { buildExploreIdeaPrompt, buildSprintBootstrapPrompt } from './sprint-command-help.js';
 import { deleteSprintArtifacts } from './sprint-cleanup.js';
 import { buildSprintRemixPayload } from './sprint-remix.js';
 import { reviewSprintState } from './sprint-review.js';
 import { ensureProjectInstructionFiles } from './project-instructions.js';
 import { appendSprintActivity, buildSprintHistory } from './sprint-history.js';
+import { getAutoSprintAction } from './sprint-auto.js';
+import { disableAutomation, enableRecommendedAutomation, isRecommendedAutomationEnabled } from './sprint-automation.js';
+import { executeSprintCommand, getSprintToolId, launchSprintTool } from './sprint-session.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const router = Router();
@@ -61,6 +60,7 @@ interface SprintSummary {
   suggestions: string[];
   created: string;
   tool_id: string;
+  automation_enabled: boolean;
   phase_history: Array<{ phase?: string; entered?: string; exited?: string }>;
 }
 
@@ -96,56 +96,6 @@ function findTmuxSession(projectId: string, feature: string): string | null {
   return null;
 }
 
-function getSprintToolId(state: SprintState): string {
-  return state.tool_id || 'claude';
-}
-
-function resolveSprintTool(toolId?: string) {
-  const effectiveToolId = toolId || 'claude';
-  const tool = getCliTool(effectiveToolId);
-  if (!tool) {
-    throw new Error(`CLI tool '${effectiveToolId}' is missing`);
-  }
-  if (!tool.enabled) {
-    throw new Error(`CLI tool '${effectiveToolId}' is disabled`);
-  }
-  return tool;
-}
-
-function sendPromptToSprintSession(sessionName: string, prompt: string) {
-  const tmpFile = join(tmpdir(), `explore-${Date.now()}.txt`);
-  writeFileSync(tmpFile, prompt);
-  execFileSync('tmux', ['load-buffer', tmpFile]);
-  execFileSync('tmux', ['paste-buffer', '-t', sessionName]);
-  execFileSync('tmux', ['send-keys', '-t', sessionName, 'Enter']);
-  unlinkSync(tmpFile);
-}
-
-function launchSprintTool(opts: {
-  sessionName: string;
-  cwd: string;
-  toolId?: string;
-  prompt?: string;
-}) {
-  const tool = resolveSprintTool(opts.toolId);
-  launchToolInTmux({
-    tmuxName: opts.sessionName,
-    cwd: opts.cwd,
-    tool,
-    prompt: opts.prompt,
-  });
-
-  if (opts.prompt && shouldSendPromptOverStdin(tool, opts.prompt)) {
-    setTimeout(() => {
-      try {
-        sendPromptToSprintSession(opts.sessionName, opts.prompt!);
-      } catch {
-        // Non-fatal.
-      }
-    }, 5000);
-  }
-}
-
 /** List all sprints for a project by reading its .sprints/ directory. */
 function listSprintsForProject(
   projectId: string,
@@ -170,6 +120,7 @@ function listSprintsForProject(
           created: now,
           phase: 'PLAN',
           tool_id: 'claude',
+          automation: { mode: 'manual', retro_sent_at: null },
           phase_history: [],
           activity_history: [],
           qa_routing: {},
@@ -209,6 +160,7 @@ function listSprintsForProject(
         }),
         created: state.created,
         tool_id: getSprintToolId(state),
+        automation_enabled: isRecommendedAutomationEnabled(state),
         phase_history: (state.phase_history as Array<{ phase?: string; entered?: string; exited?: string }>).map(
           (e) => ({ phase: e.phase, entered: e.entered, exited: e.exited }),
         ),
@@ -514,6 +466,7 @@ router.post('/sprints', (req, res) => {
     created: now,
     phase: 'PLAN',
     tool_id: toolId || 'claude',
+    automation: { mode: 'manual', retro_sent_at: null },
     origin: {
       type: 'new-sprint',
       project_id: projectId,
@@ -548,6 +501,8 @@ router.post('/sprints', (req, res) => {
       sessionName,
       cwd: project.path,
       toolId: state.tool_id,
+      projectId,
+      featureId: state.feature,
       prompt: buildSprintBootstrapPrompt({
         projectId,
         projectPath: project.path,
@@ -618,6 +573,7 @@ router.get('/sprints/:projectId/:featureId/detail', (req, res) => {
     tmux_session: tmuxMatch ?? `${project.id}-${state.feature.replace(/^feat-/, '')}`,
     tmux_active: tmuxMatch !== null,
     tool_id: getSprintToolId(state),
+    automation_enabled: isRecommendedAutomationEnabled(state),
     chain_status: deriveChainStatus(state),
     activity_history: Array.isArray(state.activity_history) ? state.activity_history : [],
   });
@@ -629,6 +585,7 @@ const ALLOWED_COMMANDS = new Set([
   '/retro', '/investigate', '/office-hours', '/plan-ceo-review',
   '/plan-eng-review', '/plan-design-review', '/browse', '/careful',
   '/freeze', '/guard', '/unfreeze', '/benchmark', '/canary',
+  '/autoplan',
 ]);
 
 /** Validate a command is safe to send to tmux — whitelist only. */
@@ -637,6 +594,36 @@ function isCommandSafe(command: string): boolean {
   if (ALLOWED_COMMANDS.has(trimmed)) return true;
   if (/^\/sprint\s+(new|switch|status|close|retro)\b/.test(trimmed)) return true;
   return false;
+}
+
+function transitionSprintState(input: {
+  sprintDir: string;
+  state: SprintState;
+  toPhase: string;
+  summary?: string;
+}) {
+  const { sprintDir, state, toPhase, summary } = input;
+  const now = new Date().toISOString();
+  const updatedHistory = (state.phase_history as Array<Record<string, unknown>>).map((entry) => {
+    if (entry.phase === state.phase && !entry.exited) {
+      const closed: Record<string, unknown> = { ...entry, exited: now };
+      if (summary) closed.summary = summary.slice(0, 1000);
+      return closed;
+    }
+    return entry;
+  });
+  updatedHistory.push({ phase: toPhase, entered: now });
+
+  const updatedState: SprintState = { ...state, phase: toPhase, phase_history: updatedHistory };
+  const finalState = appendSprintActivity(updatedState, {
+    ts: now,
+    kind: 'status',
+    title: `Transitioned ${state.phase} -> ${toPhase}`,
+    detail: summary ? summary.slice(0, 1000) : undefined,
+    phase: toPhase,
+  });
+  writeSprintState(sprintDir, finalState);
+  return finalState;
 }
 
 /** POST /api/sprints/:projectId/:featureId/exec — send command to sprint tmux session */
@@ -666,58 +653,19 @@ router.post('/sprints/:projectId/:featureId/exec', (req, res) => {
     return;
   }
 
-  const sessionName = `${req.params.projectId}-${featureId.replace(/^feat-/, '')}`;
-  const prompt = buildSprintCommandPrompt({
-    command,
-    projectId: req.params.projectId,
-    projectPath: project.path,
-    sprintDir,
-    state,
-    toolId: getSprintToolId(state),
-  });
-
-  let sessionExists = true;
   try {
-    execFileSync('tmux', ['has-session', '-t', sessionName], { stdio: 'ignore' });
-  } catch {
-    sessionExists = false;
-  }
-
-  if (!sessionExists) {
-    try {
-      launchSprintTool({
-        sessionName,
-        cwd: project.path,
-        toolId: getSprintToolId(state),
-        prompt,
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: `Failed to create tmux session: ${err.message}` });
-      return;
-    }
-  } else {
-    try {
-      sendPromptToSprintSession(sessionName, prompt);
-    } catch (err: any) {
-      res.status(500).json({ error: `Failed to send command: ${err.message}` });
-      return;
-    }
-  }
-
-  try {
-    const updatedState = appendSprintActivity(state, {
-      ts: new Date().toISOString(),
-      kind: 'action',
-      title: `Sent ${command.trim()}`,
-      detail: 'Queued to the sprint terminal session.',
-      phase: state.phase,
+    const result = executeSprintCommand({
+      projectId: req.params.projectId,
+      projectPath: project.path,
+      featureId,
+      sprintDir,
+      state,
+      command,
     });
-    writeSprintState(sprintDir, updatedState);
-  } catch {
-    // Non-fatal; command was already sent.
+    res.json({ session: result.sessionName, command: command.trim(), sent: true, prompt: result.prompt });
+  } catch (err: any) {
+    res.status(500).json({ error: `Failed to send command: ${err.message}` });
   }
-
-  res.json({ session: sessionName, command: command.trim(), sent: true, prompt });
 });
 
 // --- Valid phase transitions ---
@@ -769,36 +717,107 @@ router.post('/sprints/:projectId/:featureId/transition', (req, res) => {
     }
   }
 
-  const now = new Date().toISOString();
-
-  // Close current phase and open new phase — immutable update
-  const updatedHistory = (state.phase_history as Array<Record<string, unknown>>).map((e) => {
-    if (e.phase === state.phase && !e.exited) {
-      const closed: Record<string, unknown> = { ...e, exited: now };
-      if (summary && typeof summary === 'string') closed.summary = summary.slice(0, 1000);
-      return closed;
-    }
-    return e;
-  });
-  updatedHistory.push({ phase: to_phase, entered: now });
-
-  const updatedState: SprintState = { ...state, phase: to_phase, phase_history: updatedHistory };
-  const finalState = appendSprintActivity(updatedState, {
-    ts: now,
-    kind: 'status',
-    title: `Transitioned ${state.phase} -> ${to_phase}`,
-    detail: summary && typeof summary === 'string' ? summary.slice(0, 1000) : undefined,
-    phase: to_phase,
-  });
-
   try {
-    writeSprintState(sprintDir, finalState);
+    const finalState = transitionSprintState({
+      sprintDir,
+      state,
+      toPhase: to_phase,
+      summary: summary && typeof summary === 'string' ? summary : undefined,
+    });
+    res.json({ phase: to_phase, chain_status: deriveChainStatus(finalState) });
   } catch (err: any) {
     res.status(500).json({ error: `Failed to write STATE.json: ${err.message}` });
     return;
   }
+});
 
-  res.json({ phase: to_phase, chain_status: deriveChainStatus(finalState) });
+router.post('/sprints/:projectId/:featureId/auto', (req, res) => {
+  const project = getProjects().find((p) => p.id === req.params.projectId);
+  if (!project) {
+    res.status(404).json({ error: `Project '${req.params.projectId}' not found` });
+    return;
+  }
+
+  const featureId = sanitizeSegment(req.params.featureId);
+  const sprintDir = join(project.path, '.sprints', featureId);
+  const state = readSprintState(sprintDir);
+  if (!state) {
+    res.status(404).json({ error: `Sprint '${featureId}' not found` });
+    return;
+  }
+
+  const autoAction = getAutoSprintAction({
+    phase: state.phase,
+    qaRequired: deriveChainStatus(state).qa_required,
+  });
+
+  if (!autoAction) {
+    res.status(400).json({ error: `No automatic next step is available for phase ${state.phase}` });
+    return;
+  }
+
+  try {
+    const autoState = enableRecommendedAutomation(state);
+    writeSprintState(sprintDir, appendSprintActivity(autoState, {
+      ts: new Date().toISOString(),
+      kind: 'status',
+      title: 'Auto It enabled',
+      detail: `Will keep taking recommended workflow answers, starting with ${autoAction.command}.`,
+      phase: autoState.phase,
+    }));
+    const result = executeSprintCommand({
+      projectId: req.params.projectId,
+      projectPath: project.path,
+      featureId,
+      sprintDir,
+      state: readSprintState(sprintDir) || autoState,
+      command: autoAction.command,
+    });
+    res.json({
+      command: autoAction.command,
+      to_phase: autoAction.toPhase,
+      phase: result.state.phase,
+      chain_status: deriveChainStatus(result.state),
+      automation_enabled: true,
+      sent: true,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: `Failed to auto-run sprint: ${err.message}` });
+  }
+});
+
+router.post('/sprints/:projectId/:featureId/automation', (req, res) => {
+  const project = getProjects().find((p) => p.id === req.params.projectId);
+  if (!project) {
+    res.status(404).json({ error: `Project '${req.params.projectId}' not found` });
+    return;
+  }
+
+  const featureId = sanitizeSegment(req.params.featureId);
+  const sprintDir = join(project.path, '.sprints', featureId);
+  const state = readSprintState(sprintDir);
+  if (!state) {
+    res.status(404).json({ error: `Sprint '${featureId}' not found` });
+    return;
+  }
+
+  const enabled = req.body?.enabled !== false;
+  const nextState = enabled ? enableRecommendedAutomation(state) : disableAutomation(state);
+
+  try {
+    writeSprintState(sprintDir, appendSprintActivity(nextState, {
+      ts: new Date().toISOString(),
+      kind: 'status',
+      title: enabled ? 'Auto It enabled' : 'Auto It disabled',
+      detail: enabled
+        ? 'Future recommended workflow answers will be accepted automatically.'
+        : 'Sprint returned to manual workflow control.',
+      phase: nextState.phase,
+    }));
+    res.json({ automation_enabled: enabled });
+  } catch (err: any) {
+    res.status(500).json({ error: `Failed to update automation: ${err.message}` });
+  }
 });
 
 /** GET /api/retro — cross-project retrospective aggregation */
@@ -978,6 +997,7 @@ router.post('/explore-idea', (req, res) => {
         created: now,
         phase: 'PLAN',
         tool_id: toolId || 'claude',
+        automation: { mode: 'manual', retro_sent_at: null },
         origin: {
           type: 'explore-idea',
           mode: 'existing',
@@ -1010,7 +1030,14 @@ router.post('/explore-idea', (req, res) => {
           description: typeof description === 'string' ? description.slice(0, 1000) : undefined,
           toolId: state.tool_id,
         });
-        launchSprintTool({ sessionName, cwd: project.path, toolId: state.tool_id, prompt });
+        launchSprintTool({
+          sessionName,
+          cwd: project.path,
+          toolId: state.tool_id,
+          prompt,
+          projectId,
+          featureId: state.feature,
+        });
       } catch (err: any) {
         res.status(400).json({ error: err.message });
         return;
@@ -1055,6 +1082,7 @@ router.post('/explore-idea', (req, res) => {
       created: now,
       phase: 'PLAN',
       tool_id: toolId || 'claude',
+      automation: { mode: 'manual', retro_sent_at: null },
       origin: {
         type: 'explore-idea',
         mode: 'new',
@@ -1089,7 +1117,14 @@ router.post('/explore-idea', (req, res) => {
         description: typeof description === 'string' ? description.slice(0, 1000) : undefined,
         toolId: state.tool_id,
       });
-      launchSprintTool({ sessionName, cwd: projectPath, toolId: state.tool_id, prompt });
+      launchSprintTool({
+        sessionName,
+        cwd: projectPath,
+        toolId: state.tool_id,
+        prompt,
+        projectId: slug,
+        featureId: state.feature,
+      });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
       return;

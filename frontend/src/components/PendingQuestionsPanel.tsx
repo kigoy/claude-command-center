@@ -3,7 +3,7 @@ import type { PendingQuestion } from '../types';
 
 interface Props {
   requests: PendingQuestion[];
-  onRespond: (requestId: string, response: string) => Promise<void>;
+  onRespond: (request: PendingQuestion, response: string, enableAutomation?: boolean) => Promise<void>;
   onDismiss: () => void;
 }
 
@@ -15,11 +15,11 @@ export function PendingQuestionsPanel({ requests, onRespond, onDismiss }: Props)
 
   if (!request) return null;
 
-  async function submit(response: string) {
+  async function submit(response: string, enableAutomation = false) {
     setError('');
     setPendingResponse(response);
     try {
-      await onRespond(request.requestId, response);
+      await onRespond(request, response, enableAutomation);
       setCustomText('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send response');
@@ -50,13 +50,24 @@ export function PendingQuestionsPanel({ requests, onRespond, onDismiss }: Props)
         <p className="pending-questions-body">{request.question}</p>
 
         {recommended && (
-          <button
-            className="pending-questions-recommended"
-            disabled={pendingResponse !== null}
-            onClick={() => submit(recommended)}
-          >
-            {pendingResponse === recommended ? 'Sending…' : `Use recommended: ${recommended}`}
-          </button>
+          <>
+            <button
+              className="pending-questions-recommended"
+              disabled={pendingResponse !== null}
+              onClick={() => submit(recommended)}
+            >
+              {pendingResponse === recommended ? 'Sending…' : `Use recommended: ${recommended}`}
+            </button>
+            {request.projectId && request.featureId && !request.automationEnabled && (
+              <button
+                className="pending-questions-recommended pending-questions-recommended--auto"
+                disabled={pendingResponse !== null}
+                onClick={() => submit(recommended, true)}
+              >
+                {pendingResponse === recommended ? 'Sending…' : `Use recommended + Auto It`}
+              </button>
+            )}
+          </>
         )}
 
         {request.options.length > 0 && (

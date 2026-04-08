@@ -10,9 +10,10 @@ interface Props {
   onProjectLinked?: () => void;
   onDeleteSprint?: (projectId: string, feature: string) => void;
   onRemixSprint?: (projectId: string, feature: string) => void;
+  onAutoSprint?: (projectId: string, feature: string) => Promise<void>;
 }
 
-export function GroupSection({ group, projects, onNewSprint, onOpenTerminal, onProjectLinked, onDeleteSprint, onRemixSprint }: Props) {
+export function GroupSection({ group, projects, onNewSprint, onOpenTerminal, onProjectLinked, onDeleteSprint, onRemixSprint, onAutoSprint }: Props) {
   const [collapsed, setCollapsed] = useState(false);
 
   const groupProjects = group.projects
@@ -48,6 +49,7 @@ export function GroupSection({ group, projects, onNewSprint, onOpenTerminal, onP
               onProjectLinked={onProjectLinked}
               onDeleteSprint={onDeleteSprint}
               onRemixSprint={onRemixSprint}
+              onAutoSprint={onAutoSprint}
             />
           ))}
         </div>

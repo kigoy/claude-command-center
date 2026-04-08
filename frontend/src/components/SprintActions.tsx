@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import type { SprintHistoryEvent, SprintReviewReport } from '../types';
+import { getAutoAction } from '../utils/auto-action';
 
 interface Props {
   projectId: string;
@@ -7,15 +8,20 @@ interface Props {
   projectPath: string;
   branch: string;
   tmuxSession: string;
+  phase: string;
+  qaRequired: boolean;
+  onAuto?: () => Promise<void>;
   onArchive?: () => void;
   onDelete?: () => void;
   onRemix?: () => void;
 }
 
-export function SprintActions({ projectId, feature, branch, tmuxSession, onArchive, onDelete, onRemix }: Props) {
+export function SprintActions({ projectId, feature, branch, tmuxSession, phase, qaRequired, onAuto, onArchive, onDelete, onRemix }: Props) {
   const [open, setOpen] = useState(false);
   const [viewContent, setViewContent] = useState<{ title: string; content: string } | null>(null);
+  const [autoPending, setAutoPending] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const autoAction = getAutoAction(phase, qaRequired);
 
   useEffect(() => {
     if (!open) return;
@@ -90,6 +96,29 @@ export function SprintActions({ projectId, feature, branch, tmuxSession, onArchi
     }
   }
 
+  async function runAuto() {
+    if (!autoAction || autoPending) return;
+    setAutoPending(true);
+    try {
+      if (onAuto) {
+        await onAuto();
+      } else {
+        const res = await fetch(`/api/sprints/${projectId}/${feature}/auto`, { method: 'POST' });
+        if (!res.ok) {
+          const payload = await res.json().catch(() => null);
+          throw new Error(payload?.error || 'Failed to auto-run sprint');
+        }
+      }
+      setOpen(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to auto-run sprint';
+      setViewContent({ title: 'Auto It', content: message });
+      setOpen(false);
+    } finally {
+      setAutoPending(false);
+    }
+  }
+
   function formatHistory(events: SprintHistoryEvent[]): string {
     if (events.length === 0) return 'No history yet.';
 
@@ -134,6 +163,11 @@ export function SprintActions({ projectId, feature, branch, tmuxSession, onArchi
 
       {open && (
         <div className="sprint-actions-menu" onClick={(e) => e.stopPropagation()}>
+          {autoAction && (
+            <button onClick={runAuto} disabled={autoPending}>
+              {autoPending ? 'Running…' : `Auto It (${autoAction.command})`}
+            </button>
+          )}
           {onArchive && <button onClick={() => { onArchive(); setOpen(false); }}>Archive sprint</button>}
           {onRemix && <button onClick={() => { onRemix(); setOpen(false); }}>Remix sprint</button>}
           {onDelete && <button onClick={() => { onDelete(); setOpen(false); }}>Delete sprint</button>}

@@ -7,6 +7,7 @@ It combines:
 - a gstack-based workflow engine for PLAN -> BUILD -> REVIEW -> QA -> SHIP
 - a tool registry for Claude Code, GitHub Copilot, Gemini CLI, and custom terminal tools
 - a frontend approval/question loop so agents can keep moving until a real decision is required
+- a recommended-path automation mode (`Auto It`) that can carry a sprint from plan through retro
 
 ## What it does
 
@@ -16,6 +17,7 @@ It combines:
 - Surfaces sprint history, phase progress, stale/blocker alerts, and lightweight analytics in one board
 - Stores per-session tool metadata in SQLite so reopening a terminal uses the right CLI, not just a Claude default
 - Shows unresolved workflow questions directly in Mission Control with a recommended first answer
+- Lets you enable `Auto It` so Sprint Command keeps taking recommended answers and chains the next workflow step automatically
 
 ## Core concepts
 
@@ -54,6 +56,7 @@ Sprint Command is designed to be autonomous by default:
 - agents should continue the workflow without waiting for manual nudges
 - only real decision points should interrupt execution
 - when input is needed, the frontend shows the question and a recommended option first
+- if you choose `Use recommended + Auto It`, future recommended answers for that sprint are accepted automatically
 
 That behavior is reinforced in [SPRINT_COMMAND_HELP.md](SPRINT_COMMAND_HELP.md), which is injected into sprint launches across tools.
 
@@ -66,6 +69,7 @@ That behavior is reinforced in [SPRINT_COMMAND_HELP.md](SPRINT_COMMAND_HELP.md),
 - Sprint remix flow that reopens the original creation path with prefilled defaults
 - Destructive sprint deletion with tmux/session cleanup
 - Frontend pending-question modal backed by unresolved MCP ask-user requests
+- `Auto It` sprint action for `/autoplan`, `/review`, `/qa`, `/ship`, and automatic `/retro` on completion
 - Tool picker and tool-aware tmux/session handling
 - Settings for app config, project/group config, and CLI tool registry
 - Alerts for stale and blocked sprints
@@ -164,6 +168,7 @@ Useful helpers:
 4. Let the agent execute the workflow in tmux.
 5. Use board actions for review/qa/ship/archive, or open the terminal when you need direct control.
 6. If the workflow truly needs input, answer it from the frontend question modal.
+7. If you want the sprint to run end-to-end on recommended decisions, choose `Use recommended + Auto It` or start `Auto It` from the sprint card/menu.
 
 ## Project guidance sync
 

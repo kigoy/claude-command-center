@@ -46,7 +46,16 @@ export async function askUser(
     const res = await fetch(`${config.baseUrl}/api/mcp/requests?token=${config.authToken}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requestId, question, options, allowText }),
+      body: JSON.stringify({
+        requestId,
+        question,
+        options,
+        allowText,
+        sessionId: process.env.CC_SESSION_ID || '',
+        tmuxSession: process.env.CC_TMUX_SESSION || '',
+        projectId: process.env.CC_SPRINT_PROJECT_ID || '',
+        featureId: process.env.CC_SPRINT_FEATURE_ID || '',
+      }),
     });
     if (!res.ok) {
       return `Error storing request: ${res.status} ${await res.text()}`;

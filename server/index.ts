@@ -34,6 +34,8 @@ import {
 } from './cli-tools.js';
 import { getToolDisplayLabel } from './session-runtime.js';
 import { ensureProjectInstructionFiles } from './project-instructions.js';
+import { readSprintState } from './sprint-state.js';
+import { isRecommendedAutomationEnabled } from './sprint-automation.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT || '3100', 10);
@@ -63,6 +65,32 @@ function serializeSession(session: ReturnType<typeof getSessionFromDb>) {
       enabled: tool.enabled,
       builtIn: tool.builtIn,
     } : null,
+  };
+}
+
+function getSprintStateForRequest(projectId?: string, featureId?: string) {
+  if (!projectId || !featureId) return null;
+  const project = getProjects().find((entry) => entry.id === projectId);
+  if (!project) return null;
+  return readSprintState(join(project.path, '.sprints', featureId));
+}
+
+function serializePendingRequest(request: ReturnType<typeof getRequest>) {
+  if (!request) return null;
+  const session = request.sessionId ? getSessionFromDb(request.sessionId) : null;
+  const sprintState = getSprintStateForRequest(request.projectId, request.featureId);
+  return {
+    requestId: request.requestId,
+    sessionId: request.sessionId,
+    question: request.question,
+    options: request.options,
+    allowText: request.allowText,
+    createdAt: request.createdAt,
+    sessionName: session?.name || request.tmuxSession || null,
+    toolId: session?.tool_id ?? sprintState?.tool_id ?? null,
+    projectId: request.projectId ?? null,
+    featureId: request.featureId ?? null,
+    automationEnabled: sprintState ? isRecommendedAutomationEnabled(sprintState) : false,
   };
 }
 
@@ -132,12 +160,27 @@ app.post('/api/mcp/requests', (req, res) => {
     return;
   }
 
-  const { requestId, sessionId, question, options, allowText } = req.body;
+  const { requestId, sessionId, tmuxSession, projectId, featureId, question, options, allowText } = req.body;
   if (!requestId || !question) {
     res.status(400).json({ error: 'requestId and question are required' });
     return;
   }
-  createRequest(requestId, sessionId || '', question, options || [], allowText ?? true);
+  createRequest(requestId, sessionId || '', question, options || [], allowText ?? true, {
+    tmuxSession: typeof tmuxSession === 'string' ? tmuxSession : '',
+    projectId: typeof projectId === 'string' ? projectId : '',
+    featureId: typeof featureId === 'string' ? featureId : '',
+  });
+
+  const sprintState = getSprintStateForRequest(
+    typeof projectId === 'string' ? projectId : '',
+    typeof featureId === 'string' ? featureId : '',
+  );
+  if (sprintState && isRecommendedAutomationEnabled(sprintState) && Array.isArray(options) && options[0]) {
+    setResponse(requestId, options[0]);
+    res.status(201).json({ ok: true, autoAnswered: true, response: options[0] });
+    return;
+  }
+
   res.status(201).json({ ok: true });
 });
 
@@ -238,21 +281,7 @@ app.get('/api/auth/check', (_req, res) => {
 // --- MCP (cookie-authed, for web response page) ---
 
 app.get('/api/mcp/requests', (_req, res) => {
-  const requests = listRequests().map((request) => {
-    const session = request.sessionId ? getSessionFromDb(request.sessionId) : null;
-    return {
-      requestId: request.requestId,
-      sessionId: request.sessionId,
-      question: request.question,
-      options: request.options,
-      allowText: request.allowText,
-      createdAt: request.createdAt,
-      sessionName: session?.name ?? null,
-      toolId: session?.tool_id ?? null,
-    };
-  });
-
-  res.json(requests);
+  res.json(listRequests().map((request) => serializePendingRequest(request)));
 });
 
 app.get('/api/mcp/requests/:requestId', (req, res) => {
@@ -261,8 +290,7 @@ app.get('/api/mcp/requests/:requestId', (req, res) => {
     res.status(404).json({ error: 'Request not found or expired' });
     return;
   }
-  const { response, createdAt, ...safe } = request;
-  res.json(safe);
+  res.json(serializePendingRequest(request));
 });
 
 app.post('/api/mcp/respond', (req, res) => {

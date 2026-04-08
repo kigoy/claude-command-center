@@ -2,8 +2,10 @@ import { type Express, type Request, type Response } from 'express';
 import { watch, type FSWatcher, existsSync } from 'fs';
 import { join, basename, dirname } from 'path';
 import { getProjects, type ProjectConfig } from './sprint-config.js';
-import { readSprintState, deriveChainStatus } from './sprint-state.js';
+import { readSprintState, deriveChainStatus, writeSprintState } from './sprint-state.js';
 import { parseAtomCounts } from './sprint-atoms.js';
+import { isRecommendedAutomationEnabled, markRetroSent } from './sprint-automation.js';
+import { executeSprintCommand } from './sprint-session.js';
 
 // --- Types ---
 
@@ -24,6 +26,7 @@ let clientIdCounter = 0;
 const clients: SSEClient[] = [];
 const watchers: FSWatcher[] = [];
 const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const lastKnownPhase = new Map<string, string>();
 
 // --- Helpers ---
 
@@ -45,9 +48,37 @@ function buildSprintPayload(projectId: string, sprintDir: string): SprintUpdateP
       atoms_completed: atoms?.completed ?? 0,
       has_atoms: atoms !== null,
       branch: state.branch,
+      automation_enabled: isRecommendedAutomationEnabled(state),
       chain_status: deriveChainStatus(state),
     },
   };
+}
+
+function maybeRunRetro(project: ProjectConfig, sprintDir: string): void {
+  const state = readSprintState(sprintDir);
+  if (!state) return;
+
+  const previousPhase = lastKnownPhase.get(sprintDir);
+  lastKnownPhase.set(sprintDir, state.phase);
+
+  if (previousPhase === state.phase) return;
+  if (state.phase !== 'COMPLETE') return;
+  if (!isRecommendedAutomationEnabled(state)) return;
+  if (state.automation?.retro_sent_at) return;
+
+  try {
+    const result = executeSprintCommand({
+      projectId: project.id,
+      projectPath: project.path,
+      featureId: basename(sprintDir),
+      sprintDir,
+      state,
+      command: '/retro',
+    });
+    writeSprintState(sprintDir, markRetroSent(result.state));
+  } catch (err) {
+    console.warn(`[sprint-sse] Failed to auto-run retro for ${project.id}/${basename(sprintDir)}: ${err}`);
+  }
 }
 
 /** Broadcast an SSE event to all connected clients. */
@@ -73,6 +104,7 @@ function handleFileChange(project: ProjectConfig, sprintDir: string): void {
     setTimeout(() => {
       debounceTimers.delete(key);
       const payload = buildSprintPayload(project.id, sprintDir);
+      maybeRunRetro(project, sprintDir);
       if (payload) broadcast('sprint-update', payload);
     }, 100),
   );
@@ -85,6 +117,8 @@ const watchedDirs = new Set<string>();
 function watchFeatureDir(project: ProjectConfig, sprintDir: string): void {
   if (watchedDirs.has(sprintDir) || !existsSync(sprintDir)) return;
   watchedDirs.add(sprintDir);
+  const currentState = readSprintState(sprintDir);
+  if (currentState) lastKnownPhase.set(sprintDir, currentState.phase);
 
   try {
     const watcher = watch(sprintDir, (_event, filename) => {

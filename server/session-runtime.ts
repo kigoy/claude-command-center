@@ -59,13 +59,19 @@ export function shouldSendPromptOverStdin(tool: CliTool, prompt?: string): boole
   return !!prompt && tool.promptMode === 'stdin';
 }
 
-export function buildToolEnv(tool: CliTool): Record<string, string> {
+export function buildToolEnv(tool: CliTool, extraEnv?: Record<string, string>): Record<string, string> {
   const env = { ...process.env } as Record<string, string>;
   delete env.CLAUDECODE;
   delete env.CLAUDE_CODE_ENTRYPOINT;
 
   if (tool.env) {
     for (const [key, value] of Object.entries(tool.env)) {
+      env[key] = value;
+    }
+  }
+
+  if (extraEnv) {
+    for (const [key, value] of Object.entries(extraEnv)) {
       env[key] = value;
     }
   }
@@ -79,12 +85,13 @@ export function launchToolInTmux(opts: {
   tool: CliTool;
   bootstrapCommand?: string;
   prompt?: string;
+  extraEnv?: Record<string, string>;
 }) {
-  const { tmuxName, cwd, tool, bootstrapCommand, prompt } = opts;
+  const { tmuxName, cwd, tool, bootstrapCommand, prompt, extraEnv } = opts;
   const shell = process.env.SHELL || '/bin/bash';
   const launchCommand = buildPaneLaunchCommand(tool, prompt, bootstrapCommand);
   execFileSync('tmux', ['new-session', '-d', '-s', tmuxName, '-c', cwd, shell, '-lc', launchCommand], {
-    env: buildToolEnv(tool),
+    env: buildToolEnv(tool, extraEnv),
   });
 }
 
@@ -94,12 +101,13 @@ export function respawnSessionPane(opts: {
   tool: CliTool;
   prompt?: string;
   bootstrapCommand?: string;
+  extraEnv?: Record<string, string>;
 }) {
-  const { tmuxName, cwd, tool, prompt, bootstrapCommand } = opts;
+  const { tmuxName, cwd, tool, prompt, bootstrapCommand, extraEnv } = opts;
   const shell = process.env.SHELL || '/bin/bash';
   const launchCommand = buildPaneLaunchCommand(tool, prompt, bootstrapCommand);
   execFileSync('tmux', ['respawn-pane', '-k', '-t', tmuxName, '-c', cwd, shell], {
-    env: buildToolEnv(tool),
+    env: buildToolEnv(tool, extraEnv),
   });
   execFileSync('tmux', ['set-option', '-t', tmuxName, 'remain-on-exit', 'off']);
   execFileSync('tmux', ['send-keys', '-t', tmuxName, '-l', `${shell} -lc ${shellEscape(launchCommand)}`]);

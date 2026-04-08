@@ -76,6 +76,11 @@ export function createSession(
         tool,
         bootstrapCommand: opts.bootstrapCommand,
         prompt: opts.initialPrompt,
+        extraEnv: {
+          CC_SESSION_ID: id,
+          CC_SESSION_NAME: name,
+          CC_TMUX_SESSION: opts.tmuxSession,
+        },
       });
     }
 
@@ -98,6 +103,11 @@ export function createSession(
     tool,
     bootstrapCommand: opts?.bootstrapCommand,
     prompt: opts?.initialPrompt,
+    extraEnv: {
+      CC_SESSION_ID: id,
+      CC_SESSION_NAME: name,
+      CC_TMUX_SESSION: tmuxName,
+    },
   });
 
   insertSession(id, name, cwd, toolId);
@@ -170,14 +180,32 @@ export function refreshSession(id: string): boolean {
 
   try {
     if (!tmuxSessionExists(tmuxName)) {
-      launchToolInTmux({ tmuxName, cwd, tool });
+      launchToolInTmux({
+        tmuxName,
+        cwd,
+        tool,
+        extraEnv: {
+          CC_SESSION_ID: id,
+          CC_SESSION_NAME: session.name,
+          CC_TMUX_SESSION: tmuxName,
+        },
+      });
       setTmuxName(id, tmuxName);
       updateSessionStatus(id, 'running');
       return true;
     }
 
     execFileSync('tmux', ['set-option', '-t', tmuxName, 'remain-on-exit', 'on']);
-    respawnSessionPane({ tmuxName, cwd, tool });
+    respawnSessionPane({
+      tmuxName,
+      cwd,
+      tool,
+      extraEnv: {
+        CC_SESSION_ID: id,
+        CC_SESSION_NAME: session.name,
+        CC_TMUX_SESSION: tmuxName,
+      },
+    });
     updateSessionStatus(id, 'running');
     return true;
   } catch (err) {

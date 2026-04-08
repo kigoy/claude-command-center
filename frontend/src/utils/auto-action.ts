@@ -1,0 +1,22 @@
+export interface AutoAction {
+  command: string;
+  toPhase: string;
+  label: string;
+}
+
+export function getAutoAction(phase: string, qaRequired: boolean): AutoAction | null {
+  switch (phase) {
+    case 'PLAN':
+      return { command: '/autoplan', toPhase: 'BUILD', label: 'Auto It' };
+    case 'BUILD':
+      return { command: '/review', toPhase: 'REVIEW', label: 'Auto It' };
+    case 'REVIEW':
+      return qaRequired
+        ? { command: '/qa', toPhase: 'QA', label: 'Auto It' }
+        : { command: '/ship', toPhase: 'SHIP', label: 'Auto It' };
+    case 'QA':
+      return { command: '/ship', toPhase: 'SHIP', label: 'Auto It' };
+    default:
+      return null;
+  }
+}

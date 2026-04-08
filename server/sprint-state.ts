@@ -8,11 +8,18 @@ export interface SprintState {
   phase: string;
   tool_id?: string;
   origin?: SprintOrigin;
+  automation?: SprintAutomation;
   phase_history: unknown[];
   activity_history?: unknown[];
   qa_routing: Record<string, unknown>;
   blocked: boolean;
   blocked_reason: string | null;
+}
+
+export interface SprintAutomation {
+  mode?: 'manual' | 'recommended';
+  enabled_at?: string;
+  retro_sent_at?: string | null;
 }
 
 export interface SprintOrigin {

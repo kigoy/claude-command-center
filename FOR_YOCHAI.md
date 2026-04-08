@@ -461,3 +461,84 @@ In this repo, the important thing is not merely "how to run npm start." It is:
 When a product shifts from "single-tool utility" to "workflow platform," rewrite the docs from first principles.
 
 Incremental wording tweaks are usually not enough. The mental model itself has changed.
+
+---
+
+## Full recommended-path automation follow-up
+
+### 1. Approach
+
+I treated your request literally: if you choose the recommended path, Sprint Command should stop making you babysit the workflow.
+
+So the implementation now does three connected things:
+- gives each sprint a persisted automation mode
+- lets the frontend turn one recommended answer into `Use recommended + Auto It`
+- makes the backend auto-accept later recommended answers for that same sprint and finish with `/retro`
+
+### 2. Rejected alternatives
+
+I did not make `Auto It` a fake phase-jump button.
+
+That would look fast on the board but break the actual workflow truth. The right model is:
+- enable automation
+- send the real next command
+- let the CLI session drive the real state transitions
+
+### 3. Connections
+
+This ties together pieces that were already half-built:
+- the pending-question loop already knew what the recommended answer was
+- sprint actions already knew the next workflow command
+- SSE already watched sprint phase changes
+
+Now those parts cooperate instead of acting like separate features.
+
+### 4. Tools
+
+Used:
+- repo trace through sprint routes, MCP request flow, tmux launch path, and board actions
+- new server helpers for automation state and sprint command execution
+- frontend updates in Mission Control, cards, and question modal
+- `vitest`
+- `npx tsc --noEmit`
+- `npm run build`
+
+### 5. Tradeoffs
+
+I scoped automation to the recommended path only.
+
+That means the system is aggressive where we have a concrete default, but it does not hallucinate custom judgment for free-text questions or ambiguous branches. It is a strong default without pretending to be omniscient.
+
+### 6. Mistakes
+
+The easy wrong move here was to wire `Auto It` only into the frontend button copy and leave the backend stateless. That would work for one click, then fail on the next real question.
+
+The fix had to be end-to-end:
+- sprint state
+- launch env
+- MCP payload
+- server-side auto response
+- retro chaining
+
+### 7. Pitfalls
+
+Old sprint `STATE.json` files will not have automation metadata until touched. That is fine because the code treats missing automation as manual mode.
+
+Also, `Auto It` only auto-answers when the prompt actually includes options and the first option is the recommended one. That is intentional. The recommendation contract stays explicit.
+
+### 8. Expert insights
+
+Workflow automation products often fail because they automate the obvious clicks, not the decision loop.
+
+The real unlock is not "one more shortcut button." It is preserving enough context that when the next interruption appears, the system knows whether to stop or keep going.
+
+### 9. Transferable lessons
+
+If you want trustworthy autonomy, persist operator intent as state, not as UI mood.
+
+`Auto It` works because the sprint now remembers:
+- this run is in recommended mode
+- which project and feature a question belongs to
+- whether retro already fired
+
+That pattern generalizes well beyond this app.

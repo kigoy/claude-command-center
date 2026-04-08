@@ -3,6 +3,9 @@
 interface PendingRequest {
   requestId: string;
   sessionId: string;
+  tmuxSession?: string;
+  projectId?: string;
+  featureId?: string;
   question: string;
   options: string[];
   allowText: boolean;
@@ -29,10 +32,18 @@ export function createRequest(
   question: string,
   options: string[] = [],
   allowText = true,
+  metadata?: {
+    tmuxSession?: string;
+    projectId?: string;
+    featureId?: string;
+  },
 ): void {
   store.set(requestId, {
     requestId,
     sessionId,
+    tmuxSession: metadata?.tmuxSession,
+    projectId: metadata?.projectId,
+    featureId: metadata?.featureId,
     question,
     options,
     allowText,

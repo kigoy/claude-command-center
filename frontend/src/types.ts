@@ -43,6 +43,7 @@ export interface SprintSummary {
   tmux_session: string;
   tmux_active: boolean;
   tool_id: string;
+  automation_enabled?: boolean;
   chain_status: ChainStatus;
   suggestions?: string[];
   created: string;
@@ -88,6 +89,9 @@ export interface PendingQuestion {
   createdAt: number;
   sessionName: string | null;
   toolId: string | null;
+  projectId: string | null;
+  featureId: string | null;
+  automationEnabled: boolean;
 }
 
 export interface SprintDetail {
@@ -107,6 +111,7 @@ export interface SprintDetail {
   tmux_session: string;
   tmux_active: boolean;
   tool_id: string;
+  automation_enabled?: boolean;
   chain_status: ChainStatus;
   learnings?: string[];
 }

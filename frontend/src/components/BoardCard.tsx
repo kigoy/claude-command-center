@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import type { BoardSprint } from '../hooks/use-board';
 import { getHealth, getProjectColor, HEALTH_COLORS, nextAction, timeAgo } from '../utils/sprint-health';
 import type { Health } from '../utils/sprint-health';
+import { getAutoAction } from '../utils/auto-action';
 
 interface Props {
   sprint: BoardSprint;
@@ -12,27 +13,10 @@ interface Props {
   focused?: boolean;
   terminalSnippet?: string[];
   onAction?: (command: string, toPhase: string) => Promise<void>;
+  onAuto?: (projectId: string, feature: string) => Promise<void>;
   onArchive?: (projectId: string, feature: string) => void;
   onDelete?: (projectId: string, feature: string) => void;
   onRemix?: (projectId: string, feature: string) => void;
-}
-
-interface PhaseAction {
-  command: string;
-  label: string;
-  toPhase: string;
-}
-
-/** Returns the next actionable skill command for a sprint phase, or null if none. */
-function getPhaseAction(phase: string, qaRequired: boolean): PhaseAction | null {
-  switch (phase) {
-    case 'BUILD': return { command: '/review', label: '→ /review', toPhase: 'REVIEW' };
-    case 'REVIEW': return qaRequired
-      ? { command: '/qa', label: '→ /qa', toPhase: 'QA' }
-      : { command: '/ship', label: '→ /ship', toPhase: 'SHIP' };
-    case 'QA': return { command: '/ship', label: '→ /ship', toPhase: 'SHIP' };
-    default: return null;
-  }
 }
 
 function AtomRing({ completed, total }: { completed: number; total: number }) {
@@ -179,7 +163,7 @@ function BoardCardTimeline({ phaseHistory, created, isComplete }: {
   );
 }
 
-export function BoardCard({ sprint, onOpenTerminal, onSelect, selected, focused, terminalSnippet, onAction, onArchive, onDelete, onRemix }: Props) {
+export function BoardCard({ sprint, onOpenTerminal, onSelect, selected, focused, terminalSnippet, onAction, onAuto, onArchive, onDelete, onRemix }: Props) {
   const health: Health = getHealth(sprint);
   const healthColor = HEALTH_COLORS[health];
   const projectColor = getProjectColor(sprint.projectId);
@@ -192,7 +176,7 @@ export function BoardCard({ sprint, onOpenTerminal, onSelect, selected, focused,
 
   const [showTimeline, setShowTimeline] = useState(false);
 
-  const action = getPhaseAction(sprint.phase, sprint.chain_status.qa_required);
+  const action = getAutoAction(sprint.phase, sprint.chain_status.qa_required);
   const isShip = action?.toPhase === 'SHIP';
   const [confirmingShip, setConfirmingShip] = useState(false);
   const [actionPending, setActionPending] = useState(false);
@@ -215,7 +199,7 @@ export function BoardCard({ sprint, onOpenTerminal, onSelect, selected, focused,
 
   function handleAction(e: React.MouseEvent) {
     e.stopPropagation();
-    if (!action || !onAction || actionPending) return;
+    if (!action || actionPending) return;
     // /ship requires a two-click confirm
     if (isShip && !confirmingShip) {
       setConfirmingShip(true);
@@ -223,7 +207,12 @@ export function BoardCard({ sprint, onOpenTerminal, onSelect, selected, focused,
     }
     setConfirmingShip(false);
     setActionPending(true);
-    onAction(action.command, action.toPhase).finally(() => setActionPending(false));
+    const run = onAuto
+      ? onAuto(sprint.projectId, sprint.feature)
+      : onAction
+        ? onAction(action.command, action.toPhase)
+        : Promise.resolve();
+    run.finally(() => setActionPending(false));
   }
 
   function handleDelete(e: React.MouseEvent) {
@@ -264,6 +253,7 @@ export function BoardCard({ sprint, onOpenTerminal, onSelect, selected, focused,
         <span className="board-card-project" style={{ color: projectColor }}>
           {sprint.projectId}
         </span>
+        {sprint.automation_enabled && <span className="board-card-badge board-card-badge--auto">AUTO</span>}
         {sprint.blocked && <span className="board-card-badge board-card-badge--blocked">BLOCKED</span>}
         {isActive && <span className="board-card-badge board-card-badge--live">LIVE</span>}
       </div>
@@ -306,20 +296,19 @@ export function BoardCard({ sprint, onOpenTerminal, onSelect, selected, focused,
       )}
 
       {/* Phase action button */}
-      {action && onAction && (
+      {action && (onAuto || onAction) && (
         <div className="board-card-footer" onClick={(e) => e.stopPropagation()}>
           <button
             className={[
               'board-card-action-btn',
               isShip && confirmingShip ? 'board-card-action-btn--confirm' : '',
-              !sprint.tmux_active ? 'board-card-action-btn--disabled' : '',
               actionPending ? 'board-card-action-btn--pending' : '',
             ].filter(Boolean).join(' ')}
-            disabled={!sprint.tmux_active || actionPending}
-            title={!sprint.tmux_active ? 'Open terminal first' : undefined}
+            disabled={actionPending}
+            title={`Auto It: ${action.command}`}
             onClick={handleAction}
           >
-            {actionPending ? '…' : confirmingShip ? 'Confirm ship?' : action.label}
+            {actionPending ? '…' : confirmingShip ? 'Confirm auto ship?' : action.label}
           </button>
         </div>
       )}

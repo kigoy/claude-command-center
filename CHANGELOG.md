@@ -2,6 +2,19 @@
 
 All notable changes to Sprint Command Center.
 
+## [1.0.4.0] - 2026-04-08
+
+### Added
+- Recommended-path sprint automation state persisted in `STATE.json`, including one-time retro tracking
+- `Auto It` actions in Mission Control so a sprint can start `/autoplan`, `/review`, `/qa`, or `/ship` from its current phase
+- Sprint question payload metadata (`sessionId`, tmux session, project id, feature id) across the MCP ask-user bridge
+- Tests covering auto action selection and sprint automation state helpers
+
+### Changed
+- Recommended workflow questions can now be answered with `Use recommended + Auto It`, which enables sprint-level automation for future prompts
+- Sprint cards and board views now surface automation status with `AUTO` badges
+- Automated sprints send `/retro` once when they actually reach `COMPLETE`, instead of requiring another manual nudge
+
 ## [1.0.3.0] - 2026-04-08
 
 ### Added

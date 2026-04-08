@@ -12,6 +12,7 @@ interface Props {
   onOpenTerminal?: (name: string, cwd: string, tmuxSession?: string, toolId?: string) => void;
   onDelete?: (projectId: string, feature: string) => void;
   onRemix?: (projectId: string, feature: string) => void;
+  onAuto?: (projectId: string, feature: string) => Promise<void>;
 }
 
 /** Live counter showing time in current phase */
@@ -45,7 +46,7 @@ function PhaseDetailView({ entry }: { entry: PhaseHistoryEntry }) {
   );
 }
 
-export function SprintCard({ sprint, projectId, projectPath, onOpenTerminal, onDelete, onRemix }: Props) {
+export function SprintCard({ sprint, projectId, projectPath, onOpenTerminal, onDelete, onRemix, onAuto }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<SprintDetail | null>(null);
   const [pickedPhase, setPickedPhase] = useState<Phase | null>(null);
@@ -146,6 +147,7 @@ export function SprintCard({ sprint, projectId, projectPath, onOpenTerminal, onD
         </div>
 
         <div className="sprint-card-right">
+          {sprint.automation_enabled && <div className="sprint-phase-pill">AUTO</div>}
           <div className="sprint-phase-pill">{sprint.phase}</div>
           <TimeInPhase since={sprint.last_activity} />
           <span className="sprint-time-ago">{timeAgo(sprint.last_activity)}</span>
@@ -164,6 +166,9 @@ export function SprintCard({ sprint, projectId, projectPath, onOpenTerminal, onD
             projectPath={projectPath}
             branch={sprint.branch}
             tmuxSession={sprint.tmux_session}
+            phase={sprint.phase}
+            qaRequired={sprint.chain_status.qa_required}
+            onAuto={onAuto ? () => onAuto(projectId, sprint.feature) : undefined}
             onDelete={onDelete ? handleDelete : undefined}
             onRemix={onRemix ? handleRemix : undefined}
           />

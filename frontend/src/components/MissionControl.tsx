@@ -222,6 +222,21 @@ export function MissionControl() {
     }
   }, [fetchDashboard]);
 
+  const handleAutoSprint = useCallback(async (projectId: string, feature: string) => {
+    try {
+      const result = await postJson(`/api/sprints/${projectId}/${feature}/auto`, {});
+      const featureShort = feature.replace(/^feat-/, '');
+      setActionToast({ msg: `Auto It started ${result.command} for ${projectId}/${featureShort}`, ok: true });
+      fetchDashboard();
+      fetchTmux();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Auto It failed';
+      setActionToast({ msg, ok: false });
+    } finally {
+      setTimeout(() => setActionToast(null), ACTION_TOAST_DURATION_MS);
+    }
+  }, [fetchDashboard, fetchTmux]);
+
   const handleArchive = useCallback(async (projectId: string, feature: string) => {
     try {
       await postJson(`/api/sprints/${projectId}/${feature}/archive`, {});
@@ -285,18 +300,25 @@ export function MissionControl() {
     }
   }, [fetchDashboard, fetchTmux]);
 
-  const handlePendingResponse = useCallback(async (requestId: string, response: string) => {
+  const handlePendingResponse = useCallback(async (
+    request: PendingQuestion,
+    response: string,
+    enableAutomation = false,
+  ) => {
+    if (enableAutomation && request.projectId && request.featureId) {
+      await postJson(`/api/sprints/${request.projectId}/${request.featureId}/automation`, { enabled: true });
+    }
     const res = await fetch('/api/mcp/respond', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requestId, response }),
+      body: JSON.stringify({ requestId: request.requestId, response }),
     });
     if (!res.ok) {
       const payload = await res.json().catch(() => null);
       throw new Error(payload?.error || 'Failed to send response');
     }
     await fetchPendingQuestions();
-    setActionToast({ msg: 'Sent workflow answer', ok: true });
+    setActionToast({ msg: enableAutomation ? 'Sent workflow answer and enabled Auto It' : 'Sent workflow answer', ok: true });
     setTimeout(() => setActionToast(null), ACTION_TOAST_DURATION_MS);
   }, [fetchPendingQuestions]);
 
@@ -385,6 +407,7 @@ export function MissionControl() {
             onOpenTerminal={openTerminalForSprint}
             terminalSnippets={terminalSnippets}
             onAction={handleSprintAction}
+            onAuto={handleAutoSprint}
             onArchive={handleArchive}
             onDelete={handleDeleteSprint}
             onRemix={handleRemixSprint}
@@ -398,7 +421,7 @@ export function MissionControl() {
               <p className="empty">No active sprints. Use <strong>+ Sprint</strong> in the sidebar to start one.</p>
             )}
             {groups.map((g) => (
-              <GroupSection key={g.id} group={g} projects={data?.projects ?? []} onNewSprint={(projectId) => setNewSprintDraft({ projectId })} onOpenTerminal={openTerminalForSprint} onProjectLinked={fetchDashboard} onDeleteSprint={handleDeleteSprint} onRemixSprint={handleRemixSprint} />
+              <GroupSection key={g.id} group={g} projects={data?.projects ?? []} onNewSprint={(projectId) => setNewSprintDraft({ projectId })} onOpenTerminal={openTerminalForSprint} onProjectLinked={fetchDashboard} onDeleteSprint={handleDeleteSprint} onRemixSprint={handleRemixSprint} onAutoSprint={handleAutoSprint} />
             ))}
             {ungrouped.length > 0 && ungrouped.some((p) => p.sprints.length > 0) && (
               <GroupSection
@@ -409,6 +432,7 @@ export function MissionControl() {
                 onProjectLinked={fetchDashboard}
                 onDeleteSprint={handleDeleteSprint}
                 onRemixSprint={handleRemixSprint}
+                onAutoSprint={handleAutoSprint}
               />
             )}
             {data?.recommendations && data.recommendations.length > 0 && (

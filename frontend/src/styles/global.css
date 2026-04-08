@@ -1081,6 +1081,11 @@ textarea:focus {
   font-weight: 600;
 }
 
+.pending-questions-recommended--auto {
+  background: rgba(33, 150, 243, 0.12);
+  border-color: rgba(33, 150, 243, 0.35);
+}
+
 .pending-questions-options {
   display: flex;
   flex-wrap: wrap;

@@ -16,8 +16,9 @@ interface Props {
 export function ProjectGroup({ project, onNewSprint, onOpenTerminal, onProjectLinked, onDeleteSprint, onRemixSprint, onAutoSprint }: Props) {
   const [showCompleted, setShowCompleted] = useState(false);
   const [showLink, setShowLink] = useState(false);
+  const visibleSprints = project.sprints.filter((s) => !s.archived);
 
-  const active = project.sprints
+  const active = visibleSprints
     .filter((s) => s.phase !== 'COMPLETE')
     .sort((a, b) => {
       if (a.blocked && !b.blocked) return -1;
@@ -25,7 +26,7 @@ export function ProjectGroup({ project, onNewSprint, onOpenTerminal, onProjectLi
       return new Date(b.last_activity).getTime() - new Date(a.last_activity).getTime();
     });
 
-  const completed = project.sprints
+  const completed = visibleSprints
     .filter((s) => s.phase === 'COMPLETE')
     .sort((a, b) => new Date(b.last_activity).getTime() - new Date(a.last_activity).getTime());
 

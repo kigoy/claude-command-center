@@ -21,10 +21,10 @@ export function GroupSection({ group, projects, onNewSprint, onOpenTerminal, onP
     .filter((p): p is ProjectSummary => p !== undefined);
 
   const totalActive = groupProjects.reduce(
-    (n, p) => n + p.sprints.filter((s) => s.phase !== 'COMPLETE').length, 0,
+    (n, p) => n + p.sprints.filter((s) => !s.archived && s.phase !== 'COMPLETE').length, 0,
   );
   const totalBlocked = groupProjects.reduce(
-    (n, p) => n + p.sprints.filter((s) => s.blocked).length, 0,
+    (n, p) => n + p.sprints.filter((s) => !s.archived && s.blocked).length, 0,
   );
 
   return (

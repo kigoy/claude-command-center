@@ -75,12 +75,14 @@ export function SprintDashboard() {
     });
   }, []));
 
-  const totalSprints = data?.projects.reduce((n, p) => n + p.sprints.length, 0) ?? 0;
+  const totalSprints = data?.projects.reduce(
+    (n, p) => n + p.sprints.filter((s) => !s.archived).length, 0,
+  ) ?? 0;
   const totalActive = data?.projects.reduce(
-    (n, p) => n + p.sprints.filter((s) => s.phase !== 'COMPLETE').length, 0,
+    (n, p) => n + p.sprints.filter((s) => !s.archived && s.phase !== 'COMPLETE').length, 0,
   ) ?? 0;
   const totalBlocked = data?.projects.reduce(
-    (n, p) => n + p.sprints.filter((s) => s.blocked).length, 0,
+    (n, p) => n + p.sprints.filter((s) => !s.archived && s.blocked).length, 0,
   ) ?? 0;
 
   // Separate grouped and ungrouped projects
@@ -146,7 +148,7 @@ export function SprintDashboard() {
       ))}
 
       {/* Ungrouped projects under OTHER */}
-      {ungrouped.length > 0 && ungrouped.some((p) => p.sprints.length > 0) && (
+      {ungrouped.length > 0 && ungrouped.some((p) => p.sprints.some((s) => !s.archived)) && (
         <GroupSection
           group={{ id: '_other', label: 'OTHER', projects: ungrouped.map((p) => p.id) }}
           projects={ungrouped}

@@ -465,13 +465,13 @@ export function MissionControl() {
         {!showingTerminal && activeView === 'dashboard' && (
           <div className="dashboard-content">
             {!data && <p className="empty">Loading...</p>}
-            {data && data.projects.reduce((n, p) => n + p.sprints.length, 0) === 0 && (
+            {data && data.projects.reduce((n, p) => n + p.sprints.filter((s) => !s.archived).length, 0) === 0 && (
               <p className="empty">No active sprints. Use <strong>+ Sprint</strong> in the sidebar to start one.</p>
             )}
             {groups.map((g) => (
               <GroupSection key={g.id} group={g} projects={data?.projects ?? []} onNewSprint={(projectId) => setNewSprintDraft({ projectId })} onOpenTerminal={openTerminalForSprint} onProjectLinked={fetchDashboard} onDeleteSprint={handleDeleteSprint} onRemixSprint={handleRemixSprint} onAutoSprint={handleAutoSprint} />
             ))}
-            {ungrouped.length > 0 && ungrouped.some((p) => p.sprints.length > 0) && (
+            {ungrouped.length > 0 && ungrouped.some((p) => p.sprints.some((s) => !s.archived)) && (
               <GroupSection
                 group={{ id: '_other', label: 'OTHER', projects: ungrouped.map((p) => p.id) }}
                 projects={ungrouped}

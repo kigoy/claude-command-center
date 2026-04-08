@@ -19,7 +19,7 @@ import { useBoard } from '../hooks/use-board';
 import { useTerminals } from '../hooks/use-terminals';
 import { useCliTools } from '../hooks/use-cli-tools';
 import { useKeyboardNav } from '../hooks/use-keyboard-nav';
-import type { DashboardData, PendingQuestion, TmuxSession } from '../types';
+import type { DashboardData, LaunchRow, PendingQuestion, TmuxSession } from '../types';
 
 type View = 'dashboard' | 'board' | 'analytics' | 'settings';
 type NewSprintDraft = { projectId?: string; featureName?: string };
@@ -336,6 +336,21 @@ export function MissionControl() {
     setActiveTerminalId(null);
   }, [setActiveTerminalId]);
 
+  const resolveBatchHighlight = useCallback((rows: LaunchRow[]) => {
+    for (const row of rows) {
+      const directKey = `${row.project_id}-${row.normalized_name}`;
+      if (allSprints.some((s) => `${s.projectId}-${s.feature}` === directKey)) {
+        return directKey;
+      }
+
+      const featureKey = `${row.project_id}-feat-${row.normalized_name}`;
+      if (allSprints.some((s) => `${s.projectId}-${s.feature}` === featureKey)) {
+        return featureKey;
+      }
+    }
+    return null;
+  }, [allSprints]);
+
   const handleTerminalClosed = useCallback((sessionId: string) => {
     closeTerminal(sessionId);
     setActiveView('board');
@@ -546,8 +561,17 @@ export function MissionControl() {
         <BatchCreateOverlay
           projects={data?.projects ?? []}
           toolId={selectedToolId}
-          onClose={() => {
+          onOpenSession={(row) => {
+            if (!row.tmux_name) return;
+            void openTerminalByTmuxName(row.tmux_name, row.cwd, row.tool_id);
+          }}
+          onClose={(payload) => {
+            const highlightKey = payload ? resolveBatchHighlight(payload.createdRows) : null;
             setShowBatchCreate(false);
+            setActiveView('board');
+            if (highlightKey) setSelectedSprint(highlightKey);
+            void fetchDashboard();
+            void fetchTmux();
             requestAnimationFrame(() => {
               batchCreateTriggerRef.current?.focus();
             });

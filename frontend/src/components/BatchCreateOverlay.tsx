@@ -1,16 +1,28 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyEvent } from 'react';
-import type { ProjectSummary } from '../types';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyEvent,
+} from 'react';
+import type { LaunchBatch, LaunchRow, ProjectSummary } from '../types';
 import { useBatchCreate, MAX_BATCH_ROWS } from '../hooks/use-batch-create';
 import type { PreflightResult, PreflightStatus } from '../hooks/use-batch-create';
+import { useBatchLaunch } from '../hooks/use-batch-launch';
 import { BatchRowList } from './BatchRowList';
 
-// Mobile stepped flow states
 type MobileStep = 'draft' | 'review' | 'launch' | 'results';
+
+interface BatchClosePayload {
+  createdRows: LaunchRow[];
+}
 
 interface Props {
   projects: ProjectSummary[];
   toolId: string;
-  onClose: () => void;
+  onClose: (payload?: BatchClosePayload) => void;
+  onOpenSession: (row: LaunchRow) => void;
 }
 
 const FOCUSABLE_SELECTOR = [
@@ -22,6 +34,15 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(', ');
 
+const RESULT_ROW_ORDER: Record<LaunchRow['state'], number> = {
+  failed: 0,
+  interrupted: 1,
+  blocked: 2,
+  launching: 3,
+  launchable: 4,
+  created: 5,
+};
+
 function getFocusableElements(root: HTMLDivElement | null): HTMLElement[] {
   if (!root) return [];
   return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
@@ -29,7 +50,24 @@ function getFocusableElements(root: HTMLDivElement | null): HTMLElement[] {
   );
 }
 
-export function BatchCreateOverlay({ projects, toolId, onClose }: Props) {
+function summarizeRows(rows: LaunchRow[]) {
+  return rows.reduce(
+    (summary, row) => {
+      summary[row.state] += 1;
+      return summary;
+    },
+    {
+      blocked: 0,
+      created: 0,
+      failed: 0,
+      interrupted: 0,
+      launching: 0,
+      launchable: 0,
+    },
+  );
+}
+
+export function BatchCreateOverlay({ projects, toolId, onClose, onOpenSession }: Props) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const [mobileStep, setMobileStep] = useState<MobileStep>('draft');
@@ -45,19 +83,47 @@ export function BatchCreateOverlay({ projects, toolId, onClose }: Props) {
     overCap,
   } = useBatchCreate();
 
-  // Close on Escape
+  const {
+    batch,
+    rows: launchRows,
+    status: launchStatus,
+    transport,
+    errorMessage: launchErrorMessage,
+    launchBatch,
+    isLaunching,
+  } = useBatchLaunch();
+
+  const createdRows = useMemo(
+    () => launchRows.filter((row) => row.state === 'created'),
+    [launchRows],
+  );
+  const rowSummary = useMemo(() => summarizeRows(launchRows), [launchRows]);
+  const hasLaunchResults = !!batch;
+  const canClose = !isLaunching;
+  const mobileStepLabels: MobileStep[] = ['draft', 'review', 'launch', 'results'];
+
+  const safeClose = useCallback(() => {
+    if (!canClose) return;
+    onClose(createdRows.length > 0 ? { createdRows } : undefined);
+  }, [canClose, createdRows, onClose]);
+
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') safeClose();
     }
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [onClose]);
+  }, [safeClose]);
 
-  // Focus the close button on mount so keyboard users land inside the overlay.
   useEffect(() => {
     closeButtonRef.current?.focus();
   }, []);
+
+  useEffect(() => {
+    if (launchStatus === 'running' || launchStatus === 'settled') {
+      setMobileStep('results');
+    }
+  }, [launchStatus]);
 
   function handleOverlayKeyDown(event: ReactKeyEvent<HTMLDivElement>) {
     if (event.key !== 'Tab') return;
@@ -81,18 +147,35 @@ export function BatchCreateOverlay({ projects, toolId, onClose }: Props) {
     }
   }
 
-  // Mobile: "Next" from draft triggers preflight then advances.
-  async function handleMobileNext() {
-    const idx = mobileStepLabels.indexOf(mobileStep);
-    if (idx >= mobileStepLabels.length - 1) return;
-
-    if (mobileStep === 'draft' && draftText.trim() && status !== 'done') {
-      await runPreflight();
+  async function handleLaunch() {
+    if (!draftText.trim() || !preflightResult || preflightResult.launchable_count === 0 || isLaunching) {
+      return;
     }
-    setMobileStep(mobileStepLabels[idx + 1]);
+    await launchBatch(draftText);
   }
 
-  const mobileStepLabels: MobileStep[] = ['draft', 'review', 'launch', 'results'];
+  async function handleMobileNext() {
+    if (mobileStep === 'draft') {
+      const ready = status === 'done' ? true : await runPreflight();
+      if (ready) setMobileStep('review');
+      return;
+    }
+
+    if (mobileStep === 'review') {
+      setMobileStep('launch');
+      return;
+    }
+
+    if (mobileStep === 'launch') {
+      await handleLaunch();
+    }
+  }
+
+  const previewMeta = hasLaunchResults
+    ? `${rowSummary.created} created · ${rowSummary.failed + rowSummary.interrupted} issues`
+    : preflightResult
+      ? `${preflightResult.launchable_count} ok · ${preflightResult.blocked_count} blocked`
+      : null;
 
   return (
     <div
@@ -103,21 +186,25 @@ export function BatchCreateOverlay({ projects, toolId, onClose }: Props) {
       ref={overlayRef}
       onKeyDown={handleOverlayKeyDown}
     >
-      {/* Header */}
       <header className="batch-overlay__header">
         <div className="batch-overlay__header-left">
           <span className="batch-overlay__title">BATCH CREATE</span>
-          <span className="batch-overlay__subtitle">Launch multiple sessions at once</span>
+          <span className="batch-overlay__subtitle">
+            {hasLaunchResults ? 'Result board stays open until launch settles' : 'Launch multiple sessions at once'}
+          </span>
         </div>
         <div className="batch-overlay__header-right">
-          {/* Mobile step indicator */}
           <nav className="batch-overlay__mobile-steps" aria-label="Steps">
             {mobileStepLabels.map((step, i) => (
               <button
                 key={step}
                 className={`batch-overlay__mobile-step${mobileStep === step ? ' batch-overlay__mobile-step--active' : ''}${mobileStepLabels.indexOf(mobileStep) > i ? ' batch-overlay__mobile-step--done' : ''}`}
-                onClick={() => setMobileStep(step)}
+                onClick={() => {
+                  if (isLaunching) return;
+                  setMobileStep(step);
+                }}
                 aria-current={mobileStep === step ? 'step' : undefined}
+                disabled={isLaunching && step !== 'results'}
               >
                 <span className="batch-overlay__mobile-step-num">{i + 1}</span>
                 <span className="batch-overlay__mobile-step-label">{step.toUpperCase()}</span>
@@ -127,17 +214,17 @@ export function BatchCreateOverlay({ projects, toolId, onClose }: Props) {
           <button
             ref={closeButtonRef}
             className="batch-overlay__close"
-            onClick={onClose}
+            onClick={safeClose}
             aria-label="Close Batch Create"
+            disabled={!canClose}
+            title={canClose ? undefined : 'Wait for launch to settle before closing'}
           >
             ✕
           </button>
         </div>
       </header>
 
-      {/* Desktop: 3-zone layout. Mobile: single stepped column. */}
       <div className="batch-overlay__body">
-        {/* Composer pane */}
         <section
           className={`batch-overlay__composer${mobileStep === 'draft' ? ' batch-overlay__zone--active' : ''}`}
           aria-label="Composer"
@@ -156,61 +243,73 @@ export function BatchCreateOverlay({ projects, toolId, onClose }: Props) {
             draftText={draftText}
             onDraftChange={setDraftText}
             onPreflight={runPreflight}
-            isLoading={status === 'loading'}
+            isLoading={status === 'loading' || isLaunching || launchStatus === 'settled'}
             overCap={overCap}
             rowCount={rowCount}
             status={status}
           />
         </section>
 
-        {/* Preview pane */}
         <section
-          className={`batch-overlay__preview${mobileStep === 'review' ? ' batch-overlay__zone--active' : ''}`}
-          aria-label="Preview"
+          className={`batch-overlay__preview${mobileStep === 'review' || mobileStep === 'results' ? ' batch-overlay__zone--active' : ''}`}
+          aria-label={hasLaunchResults ? 'Results' : 'Preview'}
         >
           <div className="batch-overlay__zone-header">
-            <span className="batch-overlay__zone-label">REVIEW</span>
-            {preflightResult && (
-              <span className="batch-overlay__zone-label-meta">
-                {preflightResult.launchable_count} ok · {preflightResult.blocked_count} blocked
-              </span>
-            )}
+            <span className="batch-overlay__zone-label">{hasLaunchResults ? 'RESULTS' : 'REVIEW'}</span>
+            {previewMeta && <span className="batch-overlay__zone-label-meta">{previewMeta}</span>}
           </div>
-          <PreviewPane
-            preflightResult={preflightResult}
-            status={status}
-            errorMessage={errorMessage}
-            onPreflight={runPreflight}
-            hasDraft={draftText.trim().length > 0}
-          />
+          {hasLaunchResults ? (
+            <ResultPane
+              batch={batch}
+              rows={launchRows}
+              transport={transport}
+              launchStatus={launchStatus}
+              onOpenSession={onOpenSession}
+            />
+          ) : (
+            <PreviewPane
+              preflightResult={preflightResult}
+              status={status}
+              errorMessage={errorMessage}
+              onPreflight={runPreflight}
+              hasDraft={draftText.trim().length > 0}
+            />
+          )}
         </section>
 
-        {/* Summary rail */}
         <aside
           className={`batch-overlay__rail${mobileStep === 'launch' || mobileStep === 'results' ? ' batch-overlay__zone--active' : ''}`}
           aria-label="Summary and launch"
         >
           <div className="batch-overlay__zone-header">
-            <span className="batch-overlay__zone-label">LAUNCH</span>
+            <span className="batch-overlay__zone-label">{hasLaunchResults ? 'SUMMARY' : 'LAUNCH'}</span>
           </div>
           <BatchRail
             preflightResult={preflightResult}
-            status={status}
+            batch={batch}
+            rows={launchRows}
+            preflightStatus={status}
+            launchStatus={launchStatus}
+            transport={transport}
+            launchErrorMessage={launchErrorMessage}
             rowCount={rowCount}
-            onClose={onClose}
+            onLaunch={handleLaunch}
+            onClose={safeClose}
+            canClose={canClose}
           />
         </aside>
       </div>
 
-      {/* Mobile navigation footer */}
       <footer className="batch-overlay__mobile-nav">
         {mobileStep !== 'draft' && (
           <button
             className="batch-overlay__mobile-nav-btn batch-overlay__mobile-nav-btn--back"
             onClick={() => {
+              if (isLaunching) return;
               const idx = mobileStepLabels.indexOf(mobileStep);
               if (idx > 0) setMobileStep(mobileStepLabels[idx - 1]);
             }}
+            disabled={isLaunching}
           >
             ← Back
           </button>
@@ -219,15 +318,21 @@ export function BatchCreateOverlay({ projects, toolId, onClose }: Props) {
           <button
             className="batch-overlay__mobile-nav-btn batch-overlay__mobile-nav-btn--next"
             onClick={handleMobileNext}
-            disabled={status === 'loading'}
+            disabled={
+              status === 'loading' ||
+              (mobileStep === 'draft' && !draftText.trim()) ||
+              (mobileStep === 'launch' && (!preflightResult || preflightResult.launchable_count === 0 || isLaunching))
+            }
           >
             {status === 'loading'
               ? 'Checking…'
               : mobileStep === 'draft'
                 ? 'Preflight →'
-                : mobileStep === 'launch'
-                  ? 'Launch →'
-                  : 'Next →'}
+                : mobileStep === 'review'
+                  ? 'Launch setup →'
+                  : isLaunching
+                    ? 'Launching…'
+                    : 'Launch →'}
           </button>
         )}
       </footer>
@@ -235,16 +340,12 @@ export function BatchCreateOverlay({ projects, toolId, onClose }: Props) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Composer — draft input with teaching example, row cap warnings, preflight CTA
-// ---------------------------------------------------------------------------
-
 interface ComposerProps {
   projects: ProjectSummary[];
   toolId: string;
   draftText: string;
   onDraftChange: (text: string) => void;
-  onPreflight: () => void;
+  onPreflight: () => Promise<boolean>;
   isLoading: boolean;
   overCap: boolean;
   rowCount: number;
@@ -278,10 +379,7 @@ function BatchComposer({
           <p className="batch-composer__hint-title">One row per line · pipe-delimited</p>
           <code className="batch-composer__hint-format">project | row-kind | name [| tool]</code>
           <p className="batch-composer__hint-kinds">
-            Row kinds:{' '}
-            <code>sprint-existing</code>
-            {' · '}
-            <code>explore-existing</code>
+            Row kinds: <code>sprint-existing</code> {' · '} <code>explore-existing</code>
           </p>
           <p className="batch-composer__hint-tool">
             Tool defaults to <code>claude</code> · up to {MAX_BATCH_ROWS} rows
@@ -302,7 +400,7 @@ function BatchComposer({
       />
       {overCap && (
         <div className="batch-composer__cap-warning" role="alert">
-          ⚠ Input exceeds {MAX_BATCH_ROWS} rows — only the first {MAX_BATCH_ROWS} will be processed.
+          Input exceeds {MAX_BATCH_ROWS} rows — only the first {MAX_BATCH_ROWS} will be processed.
         </div>
       )}
       <div className="batch-composer__footer">
@@ -321,26 +419,28 @@ function BatchComposer({
           disabled={isLoading || isEmpty}
           aria-busy={isLoading}
         >
-          {isLoading ? 'Checking…' : status === 'done' ? '↻ Re-check' : 'Preflight ↗'}
+          {isLoading ? 'Locked' : status === 'done' ? '↻ Re-check' : 'Preflight ↗'}
         </button>
       </div>
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Preview pane — shows preflight results or empty/error state
-// ---------------------------------------------------------------------------
-
 interface PreviewPaneProps {
   preflightResult: PreflightResult | null;
   status: PreflightStatus;
   errorMessage: string | null;
-  onPreflight: () => void;
+  onPreflight: () => Promise<boolean>;
   hasDraft: boolean;
 }
 
-function PreviewPane({ preflightResult, status, errorMessage, onPreflight, hasDraft }: PreviewPaneProps) {
+function PreviewPane({
+  preflightResult,
+  status,
+  errorMessage,
+  onPreflight,
+  hasDraft,
+}: PreviewPaneProps) {
   if (status === 'loading') {
     return (
       <div className="batch-preview batch-preview--loading" aria-live="polite" aria-busy="true">
@@ -391,62 +491,145 @@ function PreviewPane({ preflightResult, status, errorMessage, onPreflight, hasDr
   );
 }
 
-// ---------------------------------------------------------------------------
-// Summary rail — preflight counts + launch CTA (execute wired in Atom 8)
-// ---------------------------------------------------------------------------
+interface ResultPaneProps {
+  batch: LaunchBatch;
+  rows: LaunchRow[];
+  transport: 'idle' | 'live' | 'polling';
+  launchStatus: 'idle' | 'submitting' | 'running' | 'settled' | 'error';
+  onOpenSession: (row: LaunchRow) => void;
+}
+
+function ResultPane({ batch, rows, transport, launchStatus, onOpenSession }: ResultPaneProps) {
+  const sortedRows = useMemo(
+    () =>
+      [...rows].sort((a, b) => {
+        const stateDelta = RESULT_ROW_ORDER[a.state] - RESULT_ROW_ORDER[b.state];
+        return stateDelta !== 0 ? stateDelta : a.position - b.position;
+      }),
+    [rows],
+  );
+
+  return (
+    <div className="batch-preview batch-preview--done">
+      {transport === 'polling' && launchStatus === 'running' && (
+        <div className="batch-preview__transport-banner" role="status">
+          Live stream disconnected. Polling persisted batch state until launch settles.
+        </div>
+      )}
+      <div className="batch-result-board" aria-live={launchStatus === 'running' ? 'polite' : undefined}>
+        <div className="batch-result-board__header">
+          <span className={`batch-state-pill batch-state-pill--${batch.state}`}>{batch.state}</span>
+          <span className="batch-result-board__updated">Updated {formatTimestamp(batch.updated_at)}</span>
+        </div>
+        <ul className="batch-row-list" aria-label="Launch results">
+          {sortedRows.map((row) => {
+            const issueText = row.error_message ?? row.blocked_reason;
+            const canOpen = row.state === 'created' && !!row.tmux_name;
+            return (
+              <li key={row.id} className={`batch-row-item batch-row-item--${row.state}`}>
+                <span className="batch-row-item__pos" aria-hidden="true">
+                  {String(row.position + 1).padStart(2, '0')}
+                </span>
+                <span className="batch-row-item__dot" aria-label={row.state} title={row.state} />
+                <div className="batch-row-item__body">
+                  <div className="batch-row-item__label-row">
+                    <div className="batch-row-item__label">{row.label}</div>
+                    <span className={`batch-state-chip batch-state-chip--${row.state}`}>{row.state}</span>
+                  </div>
+                  <div className="batch-row-item__meta">
+                    <span className="batch-row-item__kind">{row.row_kind}</span>
+                    {row.tool_id !== 'claude' && <span className="batch-row-item__tool">{row.tool_id}</span>}
+                    {row.tmux_name && <span className="batch-row-item__tmux">{row.tmux_name}</span>}
+                  </div>
+                  {issueText && <div className="batch-row-item__reason">{issueText}</div>}
+                  {canOpen && (
+                    <div className="batch-row-item__actions">
+                      <button
+                        className="batch-row-item__open-btn"
+                        onClick={() => onOpenSession(row)}
+                      >
+                        Open session
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </div>
+  );
+}
 
 interface RailProps {
   preflightResult: PreflightResult | null;
-  status: PreflightStatus;
+  batch: LaunchBatch | null;
+  rows: LaunchRow[];
+  preflightStatus: PreflightStatus;
+  launchStatus: 'idle' | 'submitting' | 'running' | 'settled' | 'error';
+  transport: 'idle' | 'live' | 'polling';
+  launchErrorMessage: string | null;
   rowCount: number;
+  onLaunch: () => Promise<void>;
   onClose: () => void;
+  canClose: boolean;
 }
 
-function BatchRail({ preflightResult, status, rowCount, onClose }: RailProps) {
-  const launchable = preflightResult?.launchable_count ?? null;
-  const blocked = preflightResult?.blocked_count ?? null;
-  const total = preflightResult?.rows.length ?? (rowCount > 0 ? rowCount : null);
+function BatchRail({
+  preflightResult,
+  batch,
+  rows,
+  preflightStatus,
+  launchStatus,
+  transport,
+  launchErrorMessage,
+  rowCount,
+  onLaunch,
+  onClose,
+  canClose,
+}: RailProps) {
+  const launchSummary = summarizeRows(rows);
+  const total = batch?.total_rows ?? preflightResult?.rows.length ?? (rowCount > 0 ? rowCount : null);
+  const launchable = batch ? launchSummary.launchable + launchSummary.launching + launchSummary.created + launchSummary.failed + launchSummary.interrupted : preflightResult?.launchable_count ?? null;
+  const blocked = batch ? launchSummary.blocked : preflightResult?.blocked_count ?? null;
+  const created = batch ? launchSummary.created : null;
+  const failed = batch ? launchSummary.failed + launchSummary.interrupted : null;
 
-  const canLaunch = launchable !== null && launchable > 0 && status === 'done';
+  const canLaunch =
+    !batch &&
+    launchStatus !== 'submitting' &&
+    preflightStatus === 'done' &&
+    (preflightResult?.launchable_count ?? 0) > 0;
 
   return (
     <div className="batch-rail">
       <div className="batch-rail__counts">
-        <div className="batch-rail__count-row">
-          <span className="batch-rail__count-label">ROWS</span>
-          <span className={`batch-rail__count-value${total === null ? ' batch-rail__count-value--dim' : ''}`}>
-            {total ?? '—'}
-          </span>
-        </div>
-        <div className="batch-rail__count-row">
-          <span className="batch-rail__count-label">LAUNCHABLE</span>
-          <span className={`batch-rail__count-value${launchable === null ? ' batch-rail__count-value--dim' : ' batch-rail__count-value--ok'}`}>
-            {launchable ?? '—'}
-          </span>
-        </div>
-        <div className="batch-rail__count-row">
-          <span className="batch-rail__count-label">BLOCKED</span>
-          <span className={`batch-rail__count-value${blocked === null || blocked === 0 ? ' batch-rail__count-value--dim' : ' batch-rail__count-value--blocked'}`}>
-            {blocked ?? '—'}
-          </span>
-        </div>
+        <CountRow label="ROWS" value={total} />
+        <CountRow label="READY" value={launchable} tone={batch ? 'ok' : launchable ? 'ok' : 'dim'} />
+        <CountRow label="BLOCKED" value={blocked} tone={blocked ? 'blocked' : 'dim'} />
+        {batch && <CountRow label="CREATED" value={created} tone={created ? 'ok' : 'dim'} />}
+        {batch && <CountRow label="FAILED" value={failed} tone={failed ? 'blocked' : 'dim'} />}
       </div>
 
       <div className="batch-rail__divider" />
 
       <div className="batch-rail__summary">
         <p className="batch-rail__summary-text">
-          {status === 'idle' && 'Run preflight to see launch summary.'}
-          {status === 'loading' && 'Checking rows…'}
-          {status === 'error' && 'Preflight failed — fix errors and retry.'}
-          {status === 'done' && preflightResult && (
-            launchable === 0
-              ? 'All rows blocked. Fix errors and re-run preflight.'
-              : blocked !== null && blocked > 0
-                ? `${launchable} ready · ${blocked} blocked and will be skipped.`
-                : `${launchable} row${launchable !== 1 ? 's' : ''} ready to launch.`
-          )}
+          {renderRailSummary({
+            batch,
+            preflightResult,
+            preflightStatus,
+            launchStatus,
+            transport,
+            launchSummary,
+          })}
         </p>
+        {launchErrorMessage && (
+          <p className="batch-rail__error" role="alert">
+            {launchErrorMessage}
+          </p>
+        )}
       </div>
 
       <div className="batch-rail__actions">
@@ -454,16 +637,98 @@ function BatchRail({ preflightResult, status, rowCount, onClose }: RailProps) {
           className="batch-rail__launch-btn"
           disabled={!canLaunch}
           aria-disabled={!canLaunch}
-          title={canLaunch ? undefined : 'Run preflight first'}
+          onClick={() => void onLaunch()}
+          title={canLaunch ? undefined : batch ? 'Batch already launched' : 'Run preflight first'}
         >
-          Launch Batch
+          {launchStatus === 'submitting'
+            ? 'Starting…'
+            : launchStatus === 'running'
+              ? 'Launching…'
+              : batch
+                ? 'Launched'
+                : 'Launch Batch'}
         </button>
-        <button className="batch-rail__cancel-btn" onClick={onClose}>
-          Cancel
+        <button
+          className="batch-rail__cancel-btn"
+          onClick={onClose}
+          disabled={!canClose}
+          title={canClose ? undefined : 'Wait for launch to settle before closing'}
+        >
+          {batch ? 'Close results' : 'Cancel'}
         </button>
       </div>
-
-      <p className="batch-rail__atom-note">Execute wiring in Atom 8</p>
     </div>
   );
+}
+
+function CountRow({
+  label,
+  value,
+  tone = 'dim',
+}: {
+  label: string;
+  value: number | null;
+  tone?: 'dim' | 'ok' | 'blocked';
+}) {
+  return (
+    <div className="batch-rail__count-row">
+      <span className="batch-rail__count-label">{label}</span>
+      <span
+        className={`batch-rail__count-value${tone === 'dim' ? ' batch-rail__count-value--dim' : tone === 'ok' ? ' batch-rail__count-value--ok' : ' batch-rail__count-value--blocked'}`}
+      >
+        {value ?? '—'}
+      </span>
+    </div>
+  );
+}
+
+function renderRailSummary({
+  batch,
+  preflightResult,
+  preflightStatus,
+  launchStatus,
+  transport,
+  launchSummary,
+}: {
+  batch: LaunchBatch | null;
+  preflightResult: PreflightResult | null;
+  preflightStatus: PreflightStatus;
+  launchStatus: 'idle' | 'submitting' | 'running' | 'settled' | 'error';
+  transport: 'idle' | 'live' | 'polling';
+  launchSummary: ReturnType<typeof summarizeRows>;
+}) {
+  if (!batch) {
+    if (preflightStatus === 'idle') return 'Run preflight to see launch summary.';
+    if (preflightStatus === 'loading') return 'Checking rows…';
+    if (preflightStatus === 'error') return 'Preflight failed — fix the draft and retry.';
+    if (!preflightResult) return 'Preflight results will appear here.';
+    if (preflightResult.launchable_count === 0) return 'All rows are blocked. Fix errors and re-run preflight.';
+    if (preflightResult.blocked_count > 0) {
+      return `${preflightResult.launchable_count} ready · ${preflightResult.blocked_count} blocked and will be skipped.`;
+    }
+    return `${preflightResult.launchable_count} row${preflightResult.launchable_count !== 1 ? 's' : ''} ready to launch.`;
+  }
+
+  if (launchStatus === 'submitting') return 'Creating persisted batch and starting launch…';
+  if (batch.state === 'launching') {
+    return transport === 'polling'
+      ? `${launchSummary.created} launched so far. Live stream dropped, polling persisted state.`
+      : `${launchSummary.created} launched so far. Overlay stays open until launch settles.`;
+  }
+  if (batch.state === 'completed') {
+    return `${launchSummary.created} session${launchSummary.created !== 1 ? 's' : ''} launched successfully.`;
+  }
+  if (batch.state === 'partial') {
+    return `${launchSummary.created} launched · ${launchSummary.failed + launchSummary.interrupted} failed/interrupted · ${launchSummary.blocked} blocked.`;
+  }
+  if (batch.state === 'interrupted') {
+    return `${launchSummary.created} launched before interruption. Review result rows before closing.`;
+  }
+  return 'Launch failed before the batch could fully settle.';
+}
+
+function formatTimestamp(value: string): string {
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) return value;
+  return timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }

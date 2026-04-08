@@ -46,8 +46,8 @@ export function useBatchCreate() {
   const overCap = rowCount > MAX_BATCH_ROWS;
   const cappedCount = Math.min(rowCount, MAX_BATCH_ROWS);
 
-  const runPreflight = useCallback(async () => {
-    if (!draftText.trim()) return;
+  const runPreflight = useCallback(async (): Promise<boolean> => {
+    if (!draftText.trim()) return false;
     setStatus('loading');
     setErrorMessage(null);
     try {
@@ -63,9 +63,11 @@ export function useBatchCreate() {
       const result = (await res.json()) as PreflightResult;
       setPreflightResult(result);
       setStatus('done');
+      return true;
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : String(err));
       setStatus('error');
+      return false;
     }
   }, [draftText]);
 

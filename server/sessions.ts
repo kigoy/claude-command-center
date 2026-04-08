@@ -56,10 +56,20 @@ export function createSession(
 ): Session {
   const toolId = opts?.toolId || 'claude';
 
-  // Reuse existing running session with the same name.
+  // Reuse only when the requested session really targets the same work.
+  // Batch execution can legitimately launch the same normalized name in
+  // different projects, so name-only reuse is too broad.
   const all = getAllSessions();
   for (const existing of all) {
-    if (existing.name !== name || existing.status !== 'running') continue;
+    if (
+      existing.name !== name ||
+      existing.cwd !== cwd ||
+      existing.tool_id !== toolId ||
+      existing.status !== 'running'
+    ) {
+      continue;
+    }
+
     const tmux = getSessionTmuxName(existing);
     if (tmuxSessionExists(tmux)) return existing;
     updateSessionStatus(existing.id, 'dead');

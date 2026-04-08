@@ -41,6 +41,46 @@ db.exec(`
   )
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS launch_batches (
+    id TEXT PRIMARY KEY,
+    state TEXT NOT NULL DEFAULT 'pending',
+    total_rows INTEGER NOT NULL DEFAULT 0,
+    launchable_count INTEGER NOT NULL DEFAULT 0,
+    created_count INTEGER NOT NULL DEFAULT 0,
+    failed_count INTEGER NOT NULL DEFAULT 0,
+    interrupted_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS launch_rows (
+    id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL REFERENCES launch_batches(id),
+    position INTEGER NOT NULL,
+    state TEXT NOT NULL DEFAULT 'launchable',
+    project_id TEXT NOT NULL,
+    row_kind TEXT NOT NULL,
+    normalized_name TEXT NOT NULL,
+    label TEXT NOT NULL,
+    cwd TEXT NOT NULL,
+    tool_id TEXT NOT NULL DEFAULT 'claude',
+    session_id TEXT,
+    tmux_name TEXT,
+    blocked_reason TEXT,
+    error_message TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )
+`);
+
+db.exec(`CREATE INDEX IF NOT EXISTS idx_launch_rows_batch_id ON launch_rows(batch_id)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_launch_rows_state ON launch_rows(state)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_launch_batches_created_at ON launch_batches(created_at)`);
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_launch_rows_batch_position ON launch_rows(batch_id, position)`);
+
 // Additive migrations
 try { db.exec(`ALTER TABLE sessions ADD COLUMN worktree_path TEXT`); } catch {}
 try { db.exec(`ALTER TABLE sessions ADD COLUMN repo TEXT`); } catch {}
@@ -48,6 +88,9 @@ try { db.exec(`ALTER TABLE sessions ADD COLUMN pane_title TEXT`); } catch {}
 try { db.exec(`ALTER TABLE sessions ADD COLUMN rocket_mode INTEGER NOT NULL DEFAULT 0`); } catch {}
 try { db.exec(`ALTER TABLE sessions ADD COLUMN tmux_name TEXT`); } catch {}
 try { db.exec(`ALTER TABLE sessions ADD COLUMN tool_id TEXT NOT NULL DEFAULT 'claude'`); } catch {}
+try { db.exec(`ALTER TABLE launch_rows ADD COLUMN project_id TEXT NOT NULL DEFAULT ''`); } catch {}
+try { db.exec(`ALTER TABLE launch_rows ADD COLUMN row_kind TEXT NOT NULL DEFAULT ''`); } catch {}
+try { db.exec(`ALTER TABLE launch_rows ADD COLUMN normalized_name TEXT NOT NULL DEFAULT ''`); } catch {}
 db.exec(`UPDATE sessions SET tool_id = 'claude' WHERE tool_id IS NULL OR trim(tool_id) = ''`);
 
 export interface Session {

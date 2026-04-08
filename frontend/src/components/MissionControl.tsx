@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { TerminalPanel } from './TerminalPanel';
@@ -8,6 +8,7 @@ import { CommandPalette } from './CommandPalette';
 import { NewSprintDialog } from './NewSprintDialog';
 import { ExploreIdeaDialog } from './ExploreIdeaDialog';
 import { AddProjectDialog } from './AddProjectDialog';
+import { BatchCreateOverlay } from './BatchCreateOverlay';
 import { AnalyticsTab } from './AnalyticsTab';
 import { AlertBanner } from './AlertBanner';
 import { SettingsPage } from './SettingsPage';
@@ -18,7 +19,7 @@ import { useBoard } from '../hooks/use-board';
 import { useTerminals } from '../hooks/use-terminals';
 import { useCliTools } from '../hooks/use-cli-tools';
 import { useKeyboardNav } from '../hooks/use-keyboard-nav';
-import type { DashboardData, PendingQuestion, TmuxSession } from '../types';
+import type { DashboardData, LaunchRow, PendingQuestion, TmuxSession } from '../types';
 
 type View = 'dashboard' | 'board' | 'analytics' | 'settings';
 type NewSprintDraft = { projectId?: string; featureName?: string };
@@ -32,11 +33,14 @@ type ExploreIdeaDraft = {
 
 export function MissionControl() {
   const navigate = useNavigate();
+  const missionControlRef = useRef<HTMLDivElement>(null);
   const [activeView, setActiveView] = useState<View | null>('board');
   const [data, setData] = useState<DashboardData | null>(null);
   const [tmuxSessions, setTmuxSessions] = useState<TmuxSession[]>([]);
   const [newSprintDraft, setNewSprintDraft] = useState<NewSprintDraft | null>(null);
   const [exploreIdeaDraft, setExploreIdeaDraft] = useState<ExploreIdeaDraft | null>(null);
+  const [showBatchCreate, setShowBatchCreate] = useState(false);
+  const batchCreateTriggerRef = useRef<HTMLButtonElement>(null);
   const [showAddProject, setShowAddProject] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [selectedSprint, setSelectedSprint] = useState<string | null>(null);
@@ -174,6 +178,7 @@ export function MissionControl() {
   // Cmd+K command palette
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
+      if (showBatchCreate) return;
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
         setShowCommandPalette((v) => !v);
@@ -181,7 +186,33 @@ export function MissionControl() {
     }
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, []);
+  }, [showBatchCreate]);
+
+  useLayoutEffect(() => {
+    const backgroundNodes = Array.from(missionControlRef.current?.children ?? []).filter(
+      (node): node is HTMLElement => node instanceof HTMLElement && !node.classList.contains('batch-overlay'),
+    );
+
+    if (!showBatchCreate) {
+      backgroundNodes.forEach((node) => {
+        node.removeAttribute('inert');
+        node.removeAttribute('aria-hidden');
+      });
+      return;
+    }
+
+    backgroundNodes.forEach((node) => {
+      node.setAttribute('inert', '');
+      node.setAttribute('aria-hidden', 'true');
+    });
+
+    return () => {
+      backgroundNodes.forEach((node) => {
+        node.removeAttribute('inert');
+        node.removeAttribute('aria-hidden');
+      });
+    };
+  }, [showBatchCreate]);
 
   // --- Actions ---
 
@@ -327,6 +358,21 @@ export function MissionControl() {
     setActiveTerminalId(null);
   }, [setActiveTerminalId]);
 
+  const resolveBatchHighlight = useCallback((rows: LaunchRow[]) => {
+    for (const row of rows) {
+      const directKey = `${row.project_id}-${row.normalized_name}`;
+      if (allSprints.some((s) => `${s.projectId}-${s.feature}` === directKey)) {
+        return directKey;
+      }
+
+      const featureKey = `${row.project_id}-feat-${row.normalized_name}`;
+      if (allSprints.some((s) => `${s.projectId}-${s.feature}` === featureKey)) {
+        return featureKey;
+      }
+    }
+    return null;
+  }, [allSprints]);
+
   const handleTerminalClosed = useCallback((sessionId: string) => {
     closeTerminal(sessionId);
     setActiveView('board');
@@ -342,7 +388,7 @@ export function MissionControl() {
   const ungrouped = data?.projects.filter((p) => !groupedIds.has(p.id)) ?? [];
 
   return (
-    <div className="mission-control">
+    <div className="mission-control" ref={missionControlRef}>
       {offline && <div className="offline-banner">Connection lost — retrying...</div>}
       <UpdateToast />
       <AlertBanner />
@@ -374,6 +420,8 @@ export function MissionControl() {
         onNewSprint={(projectId) => setNewSprintDraft({ projectId })}
         onExploreIdea={() => setExploreIdeaDraft({})}
         onAddProject={() => setShowAddProject(true)}
+        onBatchCreate={() => setShowBatchCreate(true)}
+        batchCreateTriggerRef={batchCreateTriggerRef}
       />
 
       <main className="mc-content">
@@ -531,6 +579,27 @@ export function MissionControl() {
           existingProjectIds={data?.projects.map((p) => p.id) ?? []}
           onClose={() => setShowAddProject(false)}
           onCreated={() => { setShowAddProject(false); fetchDashboard(); }}
+        />
+      )}
+      {showBatchCreate && (
+        <BatchCreateOverlay
+          projects={data?.projects ?? []}
+          toolId={selectedToolId}
+          onOpenSession={(row) => {
+            if (!row.tmux_name) return;
+            void openTerminalByTmuxName(row.tmux_name, row.cwd, row.tool_id);
+          }}
+          onClose={(payload) => {
+            const highlightKey = payload ? resolveBatchHighlight(payload.createdRows) : null;
+            setShowBatchCreate(false);
+            setActiveView('board');
+            if (highlightKey) setSelectedSprint(highlightKey);
+            void fetchDashboard();
+            void fetchTmux();
+            requestAnimationFrame(() => {
+              batchCreateTriggerRef.current?.focus();
+            });
+          }}
         />
       )}
     </div>

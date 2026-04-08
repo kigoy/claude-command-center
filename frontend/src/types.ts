@@ -178,3 +178,58 @@ export interface TmuxSession {
   feature: string;
   agentActive: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Batch launch types (mirrors server/batch-types.ts)
+// ---------------------------------------------------------------------------
+
+/** Lifecycle states for an individual launch row */
+export type RowState =
+  | 'launchable'
+  | 'blocked'
+  | 'launching'
+  | 'created'
+  | 'failed'
+  | 'interrupted';
+
+/** Lifecycle states for a launch batch */
+export type BatchState =
+  | 'pending'
+  | 'launching'
+  | 'completed'
+  | 'partial'
+  | 'interrupted'
+  | 'failed';
+
+/** Persisted launch batch record */
+export interface LaunchBatch {
+  id: string;
+  state: BatchState;
+  total_rows: number;
+  launchable_count: number;
+  created_count: number;
+  failed_count: number;
+  interrupted_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Persisted launch row record */
+export interface LaunchRow {
+  id: string;
+  batch_id: string;
+  position: number;
+  state: RowState;
+  project_id: string;
+  row_kind: string;
+  normalized_name: string;
+  label: string;
+  cwd: string;
+  tool_id: string;
+  session_id: string | null;
+  tmux_name: string | null;
+  blocked_reason: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+}

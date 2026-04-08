@@ -27,6 +27,7 @@ const clients: SSEClient[] = [];
 const watchers: FSWatcher[] = [];
 const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const lastKnownPhase = new Map<string, string>();
+let watchersStarted = false;
 
 // --- Helpers ---
 
@@ -177,18 +178,41 @@ function startKeepalive(): void {
       }
     }
   }, 15_000);
+  keepaliveInterval.unref?.();
+}
+
+function stopKeepalive(): void {
+  if (!keepaliveInterval) return;
+  clearInterval(keepaliveInterval);
+  keepaliveInterval = null;
+}
+
+function startWatchingProjects(): void {
+  if (watchersStarted) return;
+  for (const project of getProjects()) {
+    watchSprintsDir(project);
+  }
+  watchersStarted = true;
+  console.log(`[sprint-sse] Watching ${watchers.length} sprint directories`);
+}
+
+function stopWatchingProjects(): void {
+  if (!watchersStarted) return;
+  for (const watcher of watchers) {
+    watcher.close();
+  }
+  watchers.length = 0;
+  watchedDirs.clear();
+  for (const timer of debounceTimers.values()) {
+    clearTimeout(timer);
+  }
+  debounceTimers.clear();
+  watchersStarted = false;
 }
 
 // --- Public API ---
 
 export function setupSprintSSE(app: Express): void {
-  // Start file watchers for all project .sprints/ directories
-  for (const project of getProjects()) {
-    watchSprintsDir(project);
-  }
-  startKeepalive();
-  console.log(`[sprint-sse] Watching ${watchers.length} sprint directories`);
-
   app.get('/api/sprint-events', (req: Request, res: Response) => {
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -197,12 +221,19 @@ export function setupSprintSSE(app: Express): void {
     });
     res.write(': connected\n\n');
 
+    startWatchingProjects();
+    startKeepalive();
+
     const client: SSEClient = { id: ++clientIdCounter, res };
     clients.push(client);
 
     req.on('close', () => {
       const idx = clients.indexOf(client);
       if (idx !== -1) clients.splice(idx, 1);
+      if (clients.length === 0) {
+        stopKeepalive();
+        stopWatchingProjects();
+      }
     });
   });
 }

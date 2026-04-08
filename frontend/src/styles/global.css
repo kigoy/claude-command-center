@@ -2732,3 +2732,373 @@ textarea:focus {
     margin-left: auto;
   }
 }
+
+/* ============================================================
+   Atom 7: Composer + Preflight Preview UI
+   ============================================================ */
+
+/* Row count badge in zone header */
+.batch-overlay__row-count {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  margin-left: 0.5rem;
+}
+
+.batch-overlay__row-count--at-cap {
+  color: #ff9800;
+}
+
+.batch-overlay__row-count--over {
+  color: var(--danger);
+}
+
+.batch-overlay__zone-label-meta {
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  margin-left: 0.5rem;
+  font-weight: 400;
+}
+
+/* Composer */
+.batch-composer {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem 1rem;
+  gap: 0.5rem;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.batch-composer__hint {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(108, 99, 255, 0.06);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 4px 4px 0;
+  flex-shrink: 0;
+}
+
+.batch-composer__hint-title {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin: 0;
+}
+
+.batch-composer__hint-format {
+  font-family: monospace;
+  font-size: 0.78rem;
+  color: var(--accent);
+  background: rgba(108, 99, 255, 0.08);
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.batch-composer__hint-kinds,
+.batch-composer__hint-tool {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  margin: 0;
+}
+
+.batch-composer__hint-kinds code,
+.batch-composer__hint-tool code {
+  font-family: monospace;
+  font-size: 0.7rem;
+  color: var(--accent);
+  background: rgba(108, 99, 255, 0.08);
+  padding: 0.05rem 0.25rem;
+  border-radius: 2px;
+}
+
+.batch-composer__textarea {
+  flex: 1;
+  min-height: 0;
+  font-family: monospace;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  resize: none;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6rem 0.75rem;
+}
+
+.batch-composer__textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.batch-composer__textarea--readonly {
+  opacity: 0.65;
+  cursor: not-allowed;
+  border-color: var(--border);
+}
+
+.batch-composer__cap-warning {
+  font-size: 0.72rem;
+  color: #ff9800;
+  padding: 0.3rem 0.5rem;
+  background: rgba(255, 152, 0, 0.08);
+  border-radius: 4px;
+  border: 1px solid rgba(255, 152, 0, 0.25);
+  flex-shrink: 0;
+}
+
+.batch-composer__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.batch-composer__tool-note {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+
+.batch-composer__preflight-btn {
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.4rem 0.9rem;
+  border-radius: 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.batch-composer__preflight-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  background: var(--border);
+  color: var(--text-dim);
+}
+
+/* Preview pane states */
+.batch-preview {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.batch-preview--empty,
+.batch-preview--loading {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 2rem;
+  gap: 0.75rem;
+}
+
+.batch-preview__empty-icon {
+  font-size: 2rem;
+  color: var(--border);
+}
+
+.batch-preview__empty-text {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.batch-preview__empty-sub {
+  font-size: 0.72rem;
+  color: var(--border);
+}
+
+.batch-preview__spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.batch-preview__status-text {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.batch-preview--error {
+  padding: 1rem;
+  gap: 0.4rem;
+}
+
+.batch-preview__error-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--danger);
+  margin: 0;
+}
+
+.batch-preview__error-msg {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  font-family: monospace;
+  background: rgba(255, 68, 68, 0.06);
+  padding: 0.4rem 0.6rem;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 68, 68, 0.2);
+  margin: 0;
+  word-break: break-word;
+}
+
+.batch-preview__retry-btn {
+  align-self: flex-start;
+  font-size: 0.75rem;
+  padding: 0.35rem 0.75rem;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  margin-top: 0.25rem;
+}
+
+.batch-preview--done {
+  overflow: hidden;
+}
+
+.batch-preview__truncated-banner {
+  font-size: 0.7rem;
+  color: #ff9800;
+  padding: 0.3rem 1rem;
+  background: rgba(255, 152, 0, 0.08);
+  border-bottom: 1px solid rgba(255, 152, 0, 0.2);
+  flex-shrink: 0;
+}
+
+/* Preflight row list */
+.batch-row-list {
+  flex: 1;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.batch-row-list--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+
+.batch-row-list__empty-text {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+/* Individual row */
+.batch-row-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.45rem 1rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.batch-row-item:last-child {
+  border-bottom: none;
+}
+
+.batch-row-item--blocked {
+  background: rgba(255, 68, 68, 0.04);
+}
+
+.batch-row-item--launchable {
+  background: transparent;
+}
+
+.batch-row-item__pos {
+  font-family: monospace;
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  padding-top: 0.1rem;
+  min-width: 1.4rem;
+  flex-shrink: 0;
+}
+
+.batch-row-item__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 0.28rem;
+}
+
+.batch-row-item--launchable .batch-row-item__dot {
+  background: #4caf50;
+}
+
+.batch-row-item--blocked .batch-row-item__dot {
+  background: var(--danger);
+}
+
+.batch-row-item__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.batch-row-item__label {
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.batch-row-item--blocked .batch-row-item__label {
+  color: var(--text-dim);
+}
+
+.batch-row-item__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.batch-row-item__kind,
+.batch-row-item__tool,
+.batch-row-item__tmux {
+  font-family: monospace;
+  font-size: 0.65rem;
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+
+.batch-row-item__kind {
+  color: var(--accent);
+  border-color: rgba(108, 99, 255, 0.2);
+  background: rgba(108, 99, 255, 0.06);
+}
+
+.batch-row-item__reason {
+  font-size: 0.68rem;
+  color: var(--danger);
+  margin-top: 0.1rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

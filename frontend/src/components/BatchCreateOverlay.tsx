@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyEvent } from 'react';
 import type { ProjectSummary } from '../types';
+import { useBatchCreate, MAX_BATCH_ROWS } from '../hooks/use-batch-create';
+import type { PreflightResult, PreflightStatus } from '../hooks/use-batch-create';
+import { BatchRowList } from './BatchRowList';
 
 // Mobile stepped flow states
 type MobileStep = 'draft' | 'review' | 'launch' | 'results';
@@ -30,6 +33,17 @@ export function BatchCreateOverlay({ projects, toolId, onClose }: Props) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const [mobileStep, setMobileStep] = useState<MobileStep>('draft');
+
+  const {
+    draftText,
+    setDraftText,
+    preflightResult,
+    status,
+    errorMessage,
+    runPreflight,
+    rowCount,
+    overCap,
+  } = useBatchCreate();
 
   // Close on Escape
   useEffect(() => {
@@ -65,6 +79,17 @@ export function BatchCreateOverlay({ projects, toolId, onClose }: Props) {
       event.preventDefault();
       first.focus();
     }
+  }
+
+  // Mobile: "Next" from draft triggers preflight then advances.
+  async function handleMobileNext() {
+    const idx = mobileStepLabels.indexOf(mobileStep);
+    if (idx >= mobileStepLabels.length - 1) return;
+
+    if (mobileStep === 'draft' && draftText.trim() && status !== 'done') {
+      await runPreflight();
+    }
+    setMobileStep(mobileStepLabels[idx + 1]);
   }
 
   const mobileStepLabels: MobileStep[] = ['draft', 'review', 'launch', 'results'];
@@ -112,29 +137,55 @@ export function BatchCreateOverlay({ projects, toolId, onClose }: Props) {
 
       {/* Desktop: 3-zone layout. Mobile: single stepped column. */}
       <div className="batch-overlay__body">
-        {/* Composer pane — draft input (Atom 7 will fill this) */}
+        {/* Composer pane */}
         <section
           className={`batch-overlay__composer${mobileStep === 'draft' ? ' batch-overlay__zone--active' : ''}`}
           aria-label="Composer"
         >
           <div className="batch-overlay__zone-header">
             <span className="batch-overlay__zone-label">DRAFT</span>
+            {rowCount > 0 && (
+              <span className={`batch-overlay__row-count${overCap ? ' batch-overlay__row-count--over' : rowCount >= MAX_BATCH_ROWS ? ' batch-overlay__row-count--at-cap' : ''}`}>
+                {rowCount}/{MAX_BATCH_ROWS}
+              </span>
+            )}
           </div>
-          <ComposerPlaceholder projects={projects} toolId={toolId} />
+          <BatchComposer
+            projects={projects}
+            toolId={toolId}
+            draftText={draftText}
+            onDraftChange={setDraftText}
+            onPreflight={runPreflight}
+            isLoading={status === 'loading'}
+            overCap={overCap}
+            rowCount={rowCount}
+            status={status}
+          />
         </section>
 
-        {/* Preview pane — preflight preview rows (Atom 7 will fill this) */}
+        {/* Preview pane */}
         <section
           className={`batch-overlay__preview${mobileStep === 'review' ? ' batch-overlay__zone--active' : ''}`}
           aria-label="Preview"
         >
           <div className="batch-overlay__zone-header">
             <span className="batch-overlay__zone-label">REVIEW</span>
+            {preflightResult && (
+              <span className="batch-overlay__zone-label-meta">
+                {preflightResult.launchable_count} ok · {preflightResult.blocked_count} blocked
+              </span>
+            )}
           </div>
-          <PreviewPlaceholder />
+          <PreviewPane
+            preflightResult={preflightResult}
+            status={status}
+            errorMessage={errorMessage}
+            onPreflight={runPreflight}
+            hasDraft={draftText.trim().length > 0}
+          />
         </section>
 
-        {/* Summary rail — launch CTA and counts (Atom 8 will fill this) */}
+        {/* Summary rail */}
         <aside
           className={`batch-overlay__rail${mobileStep === 'launch' || mobileStep === 'results' ? ' batch-overlay__zone--active' : ''}`}
           aria-label="Summary and launch"
@@ -142,7 +193,12 @@ export function BatchCreateOverlay({ projects, toolId, onClose }: Props) {
           <div className="batch-overlay__zone-header">
             <span className="batch-overlay__zone-label">LAUNCH</span>
           </div>
-          <RailPlaceholder onClose={onClose} />
+          <BatchRail
+            preflightResult={preflightResult}
+            status={status}
+            rowCount={rowCount}
+            onClose={onClose}
+          />
         </aside>
       </div>
 
@@ -162,12 +218,16 @@ export function BatchCreateOverlay({ projects, toolId, onClose }: Props) {
         {mobileStep !== 'results' && (
           <button
             className="batch-overlay__mobile-nav-btn batch-overlay__mobile-nav-btn--next"
-            onClick={() => {
-              const idx = mobileStepLabels.indexOf(mobileStep);
-              if (idx < mobileStepLabels.length - 1) setMobileStep(mobileStepLabels[idx + 1]);
-            }}
+            onClick={handleMobileNext}
+            disabled={status === 'loading'}
           >
-            {mobileStep === 'launch' ? 'Launch →' : 'Next →'}
+            {status === 'loading'
+              ? 'Checking…'
+              : mobileStep === 'draft'
+                ? 'Preflight →'
+                : mobileStep === 'launch'
+                  ? 'Launch →'
+                  : 'Next →'}
           </button>
         )}
       </footer>
@@ -175,56 +235,200 @@ export function BatchCreateOverlay({ projects, toolId, onClose }: Props) {
   );
 }
 
-// --- Placeholder zones (replaced in Atom 7 / Atom 8) ---
+// ---------------------------------------------------------------------------
+// Composer — draft input with teaching example, row cap warnings, preflight CTA
+// ---------------------------------------------------------------------------
 
-function ComposerPlaceholder({ projects, toolId }: { projects: ProjectSummary[]; toolId: string }) {
+interface ComposerProps {
+  projects: ProjectSummary[];
+  toolId: string;
+  draftText: string;
+  onDraftChange: (text: string) => void;
+  onPreflight: () => void;
+  isLoading: boolean;
+  overCap: boolean;
+  rowCount: number;
+  status: string;
+}
+
+function BatchComposer({
+  projects,
+  toolId,
+  draftText,
+  onDraftChange,
+  onPreflight,
+  isLoading,
+  overCap,
+  rowCount,
+  status,
+}: ComposerProps) {
+  const exampleProject = projects[0]?.id ?? 'my-project';
+  const placeholder = [
+    `${exampleProject} | sprint-existing | fix-login`,
+    `${exampleProject} | sprint-existing | dashboard-refresh`,
+    `${exampleProject} | explore-existing | research-auth`,
+  ].join('\n');
+
+  const isEmpty = draftText.trim().length === 0;
+
   return (
-    <div className="batch-placeholder">
-      <p className="batch-placeholder__hint">
-        Paste rows — one session per line.<br />
-        <code>project | feature description</code>
-      </p>
+    <div className="batch-composer">
+      {isEmpty && (
+        <div className="batch-composer__hint">
+          <p className="batch-composer__hint-title">One row per line · pipe-delimited</p>
+          <code className="batch-composer__hint-format">project | row-kind | name [| tool]</code>
+          <p className="batch-composer__hint-kinds">
+            Row kinds:{' '}
+            <code>sprint-existing</code>
+            {' · '}
+            <code>explore-existing</code>
+          </p>
+          <p className="batch-composer__hint-tool">
+            Tool defaults to <code>claude</code> · up to {MAX_BATCH_ROWS} rows
+          </p>
+        </div>
+      )}
       <textarea
-        className="batch-placeholder__textarea"
-        placeholder={`${projects[0]?.id ?? 'my-project'} | feat-new-login\n${projects[0]?.id ?? 'my-project'} | feat-dashboard-refresh`}
-        rows={8}
+        className={`batch-composer__textarea${isLoading ? ' batch-composer__textarea--readonly' : ''}`}
+        value={draftText}
+        onChange={(e) => onDraftChange(e.target.value)}
+        placeholder={placeholder}
+        rows={12}
         aria-label="Batch input — one row per session"
-        readOnly
+        readOnly={isLoading}
+        spellCheck={false}
+        autoCorrect="off"
+        autoCapitalize="off"
       />
-      <p className="batch-placeholder__note">
-        Tool: <strong>{toolId}</strong> · Up to 20 rows · Preflight coming in Atom 7
-      </p>
+      {overCap && (
+        <div className="batch-composer__cap-warning" role="alert">
+          ⚠ Input exceeds {MAX_BATCH_ROWS} rows — only the first {MAX_BATCH_ROWS} will be processed.
+        </div>
+      )}
+      <div className="batch-composer__footer">
+        <span className="batch-composer__tool-note">
+          Tool: <strong>{toolId}</strong>
+          {rowCount > 0 && (
+            <>
+              {' · '}
+              {rowCount} row{rowCount !== 1 ? 's' : ''}
+            </>
+          )}
+        </span>
+        <button
+          className="batch-composer__preflight-btn"
+          onClick={onPreflight}
+          disabled={isLoading || isEmpty}
+          aria-busy={isLoading}
+        >
+          {isLoading ? 'Checking…' : status === 'done' ? '↻ Re-check' : 'Preflight ↗'}
+        </button>
+      </div>
     </div>
   );
 }
 
-function PreviewPlaceholder() {
+// ---------------------------------------------------------------------------
+// Preview pane — shows preflight results or empty/error state
+// ---------------------------------------------------------------------------
+
+interface PreviewPaneProps {
+  preflightResult: PreflightResult | null;
+  status: PreflightStatus;
+  errorMessage: string | null;
+  onPreflight: () => void;
+  hasDraft: boolean;
+}
+
+function PreviewPane({ preflightResult, status, errorMessage, onPreflight, hasDraft }: PreviewPaneProps) {
+  if (status === 'loading') {
+    return (
+      <div className="batch-preview batch-preview--loading" aria-live="polite" aria-busy="true">
+        <div className="batch-preview__spinner" aria-hidden="true" />
+        <p className="batch-preview__status-text">Running preflight…</p>
+      </div>
+    );
+  }
+
+  if (status === 'error' && errorMessage) {
+    return (
+      <div className="batch-preview batch-preview--error" role="alert">
+        <p className="batch-preview__error-title">Preflight failed</p>
+        <p className="batch-preview__error-msg">{errorMessage}</p>
+        {hasDraft && (
+          <button className="batch-preview__retry-btn" onClick={onPreflight}>
+            Retry
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  if (!preflightResult) {
+    return (
+      <div className="batch-preview batch-preview--empty">
+        <div className="batch-preview__empty-icon" aria-hidden="true">▣</div>
+        <p className="batch-preview__empty-text">
+          Preview appears after preflight.
+          <br />
+          <span className="batch-preview__empty-sub">
+            Enter rows in the Composer, then press <strong>Preflight ↗</strong>
+          </span>
+        </p>
+      </div>
+    );
+  }
+
   return (
-    <div className="batch-placeholder batch-placeholder--empty">
-      <div className="batch-placeholder__empty-icon">▣</div>
-      <p className="batch-placeholder__empty-text">
-        Preview appears after preflight.<br />
-        <span className="batch-placeholder__empty-sub">Composer → Preflight → see launchable / blocked rows here</span>
-      </p>
+    <div className="batch-preview batch-preview--done">
+      {preflightResult.truncated && (
+        <div className="batch-preview__truncated-banner" role="alert">
+          Input was truncated to {MAX_BATCH_ROWS} rows.
+        </div>
+      )}
+      <BatchRowList rows={preflightResult.rows} />
     </div>
   );
 }
 
-function RailPlaceholder({ onClose }: { onClose: () => void }) {
+// ---------------------------------------------------------------------------
+// Summary rail — preflight counts + launch CTA (execute wired in Atom 8)
+// ---------------------------------------------------------------------------
+
+interface RailProps {
+  preflightResult: PreflightResult | null;
+  status: PreflightStatus;
+  rowCount: number;
+  onClose: () => void;
+}
+
+function BatchRail({ preflightResult, status, rowCount, onClose }: RailProps) {
+  const launchable = preflightResult?.launchable_count ?? null;
+  const blocked = preflightResult?.blocked_count ?? null;
+  const total = preflightResult?.rows.length ?? (rowCount > 0 ? rowCount : null);
+
+  const canLaunch = launchable !== null && launchable > 0 && status === 'done';
+
   return (
     <div className="batch-rail">
       <div className="batch-rail__counts">
         <div className="batch-rail__count-row">
           <span className="batch-rail__count-label">ROWS</span>
-          <span className="batch-rail__count-value batch-rail__count-value--dim">—</span>
+          <span className={`batch-rail__count-value${total === null ? ' batch-rail__count-value--dim' : ''}`}>
+            {total ?? '—'}
+          </span>
         </div>
         <div className="batch-rail__count-row">
           <span className="batch-rail__count-label">LAUNCHABLE</span>
-          <span className="batch-rail__count-value batch-rail__count-value--ok">—</span>
+          <span className={`batch-rail__count-value${launchable === null ? ' batch-rail__count-value--dim' : ' batch-rail__count-value--ok'}`}>
+            {launchable ?? '—'}
+          </span>
         </div>
         <div className="batch-rail__count-row">
           <span className="batch-rail__count-label">BLOCKED</span>
-          <span className="batch-rail__count-value batch-rail__count-value--blocked">—</span>
+          <span className={`batch-rail__count-value${blocked === null || blocked === 0 ? ' batch-rail__count-value--dim' : ' batch-rail__count-value--blocked'}`}>
+            {blocked ?? '—'}
+          </span>
         </div>
       </div>
 
@@ -232,12 +436,26 @@ function RailPlaceholder({ onClose }: { onClose: () => void }) {
 
       <div className="batch-rail__summary">
         <p className="batch-rail__summary-text">
-          Run preflight to see launch summary.
+          {status === 'idle' && 'Run preflight to see launch summary.'}
+          {status === 'loading' && 'Checking rows…'}
+          {status === 'error' && 'Preflight failed — fix errors and retry.'}
+          {status === 'done' && preflightResult && (
+            launchable === 0
+              ? 'All rows blocked. Fix errors and re-run preflight.'
+              : blocked !== null && blocked > 0
+                ? `${launchable} ready · ${blocked} blocked and will be skipped.`
+                : `${launchable} row${launchable !== 1 ? 's' : ''} ready to launch.`
+          )}
         </p>
       </div>
 
       <div className="batch-rail__actions">
-        <button className="batch-rail__launch-btn" disabled aria-disabled="true">
+        <button
+          className="batch-rail__launch-btn"
+          disabled={!canLaunch}
+          aria-disabled={!canLaunch}
+          title={canLaunch ? undefined : 'Run preflight first'}
+        >
           Launch Batch
         </button>
         <button className="batch-rail__cancel-btn" onClick={onClose}>
@@ -245,9 +463,7 @@ function RailPlaceholder({ onClose }: { onClose: () => void }) {
         </button>
       </div>
 
-      <p className="batch-rail__atom-note">
-        Execute wiring in Atom 8
-      </p>
+      <p className="batch-rail__atom-note">Execute wiring in Atom 8</p>
     </div>
   );
 }

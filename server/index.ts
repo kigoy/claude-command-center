@@ -17,7 +17,9 @@ import { notifyWaiting } from './notifier.js';
 import { startStatusPolling } from './status.js';
 import { createRequest, getRequest, setResponse, getResponse, listRequests } from './mcp-responses.js';
 import sprintApi from './sprint-api.js';
+import batchApi from './batch-api.js';
 import { setupSprintSSE } from './sprint-sse.js';
+import { setupBatchEvents } from './batch-events.js';
 import { setupTerminalSnippets } from './terminal-snippets.js';
 import { startTmuxDetection, getSprintSessions } from './tmux-detect.js';
 import { startSprintNotifications } from './sprint-notifications.js';
@@ -351,9 +353,17 @@ app.patch('/api/cli-tools/:id', (req, res) => {
 
 app.use('/api', sprintApi);
 
+// --- Batch API ---
+
+app.use('/api', batchApi);
+
 // --- Sprint SSE (live updates) ---
 
 setupSprintSSE(app);
+
+// --- Batch Events SSE (dedicated batch-state invalidation channel) ---
+
+setupBatchEvents(app);
 
 // --- Terminal Snippets SSE (mini-previews for board cards) ---
 

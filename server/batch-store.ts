@@ -93,6 +93,12 @@ const stmts = {
     WHERE id = ?
   `),
 
+  failLaunchableRowsByBatch: db.prepare<[string, string]>(`
+    UPDATE launch_rows
+    SET state = 'failed', error_message = ?, updated_at = datetime('now')
+    WHERE batch_id = ? AND state = 'launchable'
+  `),
+
   getLaunchingBatchIds: db.prepare(`
     SELECT DISTINCT batch_id FROM launch_rows WHERE state = 'launching'
   `),
@@ -185,6 +191,40 @@ const markOrphanedLaunchingTxn = db.transaction(() => {
   return interruptedRows;
 });
 
+const failBatchLaunchableRowsTxn = db.transaction((batchId: string, errorMessage: string) => {
+  const failedRows = stmts.failLaunchableRowsByBatch.run(errorMessage, batchId).changes;
+
+  const rawCounts = stmts.getBatchRowCounts.get(batchId) as
+    | {
+        launchable_count: number | null;
+        blocked_count: number | null;
+        created_count: number | null;
+        failed_count: number | null;
+        interrupted_count: number | null;
+        launching_count: number | null;
+      }
+    | undefined;
+
+  const counts = {
+    launchable_count: rawCounts?.launchable_count ?? 0,
+    blocked_count: rawCounts?.blocked_count ?? 0,
+    created_count: rawCounts?.created_count ?? 0,
+    failed_count: rawCounts?.failed_count ?? 0,
+    interrupted_count: rawCounts?.interrupted_count ?? 0,
+    launching_count: rawCounts?.launching_count ?? 0,
+  };
+
+  stmts.syncBatchCountsAndState.run(
+    counts.created_count,
+    counts.failed_count,
+    counts.interrupted_count,
+    'failed',
+    batchId,
+  );
+
+  return failedRows;
+});
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -253,6 +293,10 @@ export function setRowCreated(id: string, sessionId: string, tmuxName: string): 
 
 export function setRowFailed(id: string, errorMessage: string): void {
   stmts.setRowFailed.run(errorMessage, id);
+}
+
+export function failBatchLaunchableRows(batchId: string, errorMessage: string): number {
+  return failBatchLaunchableRowsTxn(batchId, errorMessage);
 }
 
 /**

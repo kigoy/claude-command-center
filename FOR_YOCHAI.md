@@ -219,6 +219,78 @@ Agent tooling often fails from small positional details.
 
 Humans read "the prompt contains `/office-hours`" and assume it is fine. The model often treats "first line imperative" very differently from "instruction mentioned later in a paragraph."
 
+---
+
+## Terminal Auto-Answer follow-up
+
+### 1. Approach
+
+I split the automation problem into two channels:
+- MCP ask-user prompts already had an API path
+- tmux-only prompts had no backend loop watching them
+
+So I added a small tmux watcher in `server/sprint-terminal-auto.ts` that:
+- scans active sprint tmux sessions
+- checks whether the sprint is in `automation.mode = recommended`
+- detects the terminal chooser UI
+- presses the recommended default selection
+- logs that auto-answer into sprint activity history
+
+### 2. Rejected alternatives
+
+I did not build a generic terminal AI autopilot that tries to answer arbitrary free-text questions. That would create fabricated product answers and make the workflow less trustworthy.
+
+I also did not couple this to the frontend. The backend needs to keep automation moving even when no browser tab is open.
+
+### 3. Connections
+
+This closes the gap between:
+- `/api/mcp/requests` prompts
+- terminal-only prompt boxes inside tmux
+
+Before this, `Auto It` looked enabled but still stalled whenever the skill asked inside the terminal UI. Now the same sprint can move through both prompt channels with one automation setting.
+
+### 4. Tools
+
+Used:
+- existing tmux detection in `server/tmux-detect.ts`
+- sprint state/history helpers
+- `npx tsc --noEmit`
+- live tmux capture against the active sprint sessions
+
+### 5. Tradeoffs
+
+The watcher is intentionally narrow. It only handles menu-style prompts where the recommended answer is already selected as option 1.
+
+That means it will not answer:
+- free-text questions
+- shells sitting at a plain prompt
+- arbitrary terminal output that merely happens to contain numbered text
+
+### 6. Mistakes
+
+The first matcher only handled the boxed `Asking user` UI. `.gstack` also emits a second menu layout without that marker, so I widened the matcher after checking the real panes.
+
+### 7. Pitfalls
+
+This does not solve two real remaining blockers:
+- office-hours free-text questions still need a substantive answer
+- some `.gstack` sessions are hitting Claude usage exhaustion, which no local watcher can bypass
+
+So "recommended automation" is now materially better, but not yet fully unattended from start to finish.
+
+### 8. Expert insights
+
+Workflow automation breaks at interface boundaries more often than at business logic boundaries.
+
+The system already knew the right next command and already knew how to answer MCP prompts. What was missing was watching the one place where the agent could still ask a question outside the server's structured control plane.
+
+### 9. Transferable lessons
+
+If a workflow can ask for user input in more than one transport, automation is only as reliable as the least structured transport.
+
+Treat terminal prompts, API prompts, modal prompts, and notification callbacks as one decision surface, or the user will keep experiencing "auto mode" that still needs babysitting.
+
 ### 9. Transferable lessons
 
 For multi-agent toolchains:

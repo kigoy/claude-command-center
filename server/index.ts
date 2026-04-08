@@ -7,6 +7,7 @@ import { startStatusPolling } from './status.js';
 import { seedBuiltInCliTools } from './cli-tools.js';
 import { startTmuxDetection } from './tmux-detect.js';
 import { startSprintNotifications } from './sprint-notifications.js';
+import { startSprintTerminalAutoAnswering } from './sprint-terminal-auto.js';
 import { getProjects } from './sprint-config.js';
 import { ensureProjectInstructionFiles } from './project-instructions.js';
 import { markOrphanedLaunchingRows } from './batch-store.js';
@@ -35,6 +36,7 @@ if (recoveredLaunchRows > 0) {
 syncSessionsWithTmux();
 startStatusPolling();
 startTmuxDetection();
+startSprintTerminalAutoAnswering();
 
 server.listen(PORT, () => {
   console.log(`Sprint Command Center running on http://localhost:${PORT}`);

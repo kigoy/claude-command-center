@@ -34,6 +34,7 @@ import {
 } from './cli-tools.js';
 import { getToolDisplayLabel } from './session-runtime.js';
 import { ensureProjectInstructionFiles } from './project-instructions.js';
+import { markOrphanedLaunchingRows } from './batch-store.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT || '3100', 10);
@@ -566,6 +567,10 @@ setupTerminalWs(server);
 
 // Sync existing tmux sessions on startup
 seedBuiltInCliTools();
+const recoveredLaunchRows = markOrphanedLaunchingRows();
+if (recoveredLaunchRows > 0) {
+  console.warn(`[batch] Marked ${recoveredLaunchRows} orphaned launching row(s) as interrupted`);
+}
 syncSessionsWithTmux();
 startStatusPolling();
 startTmuxDetection();

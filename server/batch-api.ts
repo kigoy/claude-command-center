@@ -27,6 +27,7 @@ import {
   setRowFailed,
   incrementBatchCreated,
   incrementBatchFailed,
+  failBatchLaunchableRows,
 } from './batch-store.js';
 import { executeBatchWithDeps } from './batch-runner.js';
 import { notifyBatchChanged } from './batch-events.js';
@@ -188,6 +189,12 @@ function runBatchAsync(batchId: string): void {
     )
     .catch((err: unknown) => {
       console.error(`[batch-api] Fatal error executing batch ${batchId}:`, err);
+      try {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        failBatchLaunchableRows(batchId, errorMessage);
+      } catch (updateErr) {
+        console.error(`[batch-api] Failed to mark batch ${batchId} as failed:`, updateErr);
+      }
       notifyBatchChanged(batchId);
     });
 }

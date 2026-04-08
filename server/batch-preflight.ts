@@ -11,6 +11,7 @@
  * No route code should reimplement the validation logic itself.
  */
 
+import { resolve, sep } from 'path';
 import { normalizeRowName, type ParsedRow, type ParseResult } from './batch-parse.js';
 import type { ProjectConfig } from './sprint-config.js';
 import type { CliTool } from './cli-tools.js';
@@ -46,6 +47,28 @@ export interface PreflightResult {
   truncated: boolean;
 }
 
+interface ExistingSessionLike {
+  name: string;
+  status: string;
+  cwd?: string | null;
+}
+
+function pathBelongsToProject(cwd: string, projectPath: string): boolean {
+  const resolvedCwd = resolve(cwd);
+  const resolvedProjectPath = resolve(projectPath);
+  return resolvedCwd === resolvedProjectPath || resolvedCwd.startsWith(`${resolvedProjectPath}${sep}`);
+}
+
+function getProjectIdForSession(session: ExistingSessionLike, projects: ProjectConfig[]): string | null {
+  if (!session.cwd) return null;
+
+  const matchedProject = [...projects]
+    .sort((a, b) => b.path.length - a.path.length)
+    .find((project) => pathBelongsToProject(session.cwd!, project.path));
+
+  return matchedProject?.id ?? null;
+}
+
 /**
  * Pure preflight logic. Accepts all external data as arguments so callers
  * (and tests) can inject mock projects, tools, and session lists.
@@ -54,14 +77,21 @@ export function preflightRows(
   parsedRows: ParsedRow[],
   projects: ProjectConfig[],
   enabledTools: CliTool[],
-  existingSessions: Array<{ name: string; status: string }>,
+  existingSessions: ExistingSessionLike[],
   truncated = false,
 ): PreflightResult {
   const projectMap = new Map(projects.map((p) => [p.id, p]));
   const toolMap = new Map(enabledTools.map((t) => [t.id, t]));
 
   const runningSessionNames = new Set(
-    existingSessions.filter((s) => s.status === 'running').map((s) => s.name),
+    existingSessions
+      .filter((s) => s.status === 'running')
+      .map((session) => {
+        const projectId = getProjectIdForSession(session, projects);
+        if (!projectId) return null;
+        return `${projectId}:${normalizeRowName(session.name)}`;
+      })
+      .filter((key): key is string => key !== null),
   );
 
   // Track within-batch collisions: "project_id:normalized_name" → first position (1-based)
@@ -118,7 +148,7 @@ export function preflightRows(
     seenInBatch.set(batchKey, parsed.position + 1);
 
     // --- Existing running session collision ---
-    if (runningSessionNames.has(normalized)) {
+    if (runningSessionNames.has(batchKey)) {
       return blocked(`a running session named '${normalized}' already exists`);
     }
 

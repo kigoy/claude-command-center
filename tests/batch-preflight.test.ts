@@ -69,7 +69,7 @@ function run(
   opts: {
     projects?: ProjectConfig[];
     tools?: CliTool[];
-    sessions?: Array<{ name: string; status: string }>;
+    sessions?: Array<{ name: string; status: string; cwd?: string | null }>;
     truncated?: boolean;
   } = {},
 ) {
@@ -222,18 +222,25 @@ describe('preflightRows — collision detection', () => {
 
   it('blocks when a running session with the same name already exists', () => {
     const result = run([row()], {
-      sessions: [{ name: 'auth-flow', status: 'running' }],
+      sessions: [{ name: 'auth-flow', status: 'running', cwd: '/repos/acme/.sprints/feat-auth-flow' }],
     });
     expect(result.rows[0].state).toBe('blocked');
     expect(result.rows[0].blocked_reason).toMatch(/running session/);
     expect(result.rows[0].blocked_reason).toContain('auth-flow');
   });
 
+  it('allows the same running session name in a different project', () => {
+    const result = run([row()], {
+      sessions: [{ name: 'auth-flow', status: 'running', cwd: '/repos/widget/.sprints/feat-auth-flow' }],
+    });
+    expect(result.rows[0].state).toBe('launchable');
+  });
+
   it('does not block against non-running sessions', () => {
     const result = run([row()], {
       sessions: [
-        { name: 'auth-flow', status: 'dead' },
-        { name: 'auth-flow', status: 'starting' },
+        { name: 'auth-flow', status: 'dead', cwd: '/repos/acme/.sprints/feat-auth-flow' },
+        { name: 'auth-flow', status: 'starting', cwd: '/repos/acme/.sprints/feat-auth-flow' },
       ],
     });
     expect(result.rows[0].state).toBe('launchable');
@@ -241,7 +248,7 @@ describe('preflightRows — collision detection', () => {
 
   it('collision check uses normalized names (case-insensitive match)', () => {
     const result = run([row({ raw_name: 'Auth Flow' })], {
-      sessions: [{ name: 'auth-flow', status: 'running' }],
+      sessions: [{ name: 'auth-flow', status: 'running', cwd: '/repos/acme/.sprints/feat-auth-flow' }],
     });
     expect(result.rows[0].state).toBe('blocked');
   });

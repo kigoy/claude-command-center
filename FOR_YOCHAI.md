@@ -542,3 +542,42 @@ If you want trustworthy autonomy, persist operator intent as state, not as UI mo
 - whether retro already fired
 
 That pattern generalizes well beyond this app.
+
+---
+
+## Batch Create — full atom build
+
+### 1. Approach
+
+I built the entire Batch Create feature as 9 atoms, each a self-contained slice committed to its own branch. Two parallel lanes (backend: atoms 1→2→3→4, frontend: 6→7) converged at atom 8 (launch flow + result board), with atom 5 as a test harness spur and atom 9 closing the coverage gap.
+
+### 2. What shipped
+
+- **Batch state contract** — SQLite schema for launch batches and rows, shared types between server and frontend
+- **Parser + preflight** — pipe/tab parsing, 20-row cap, project/tool/collision validation, pure functions
+- **Executor** — sequential launcher with partial-success, orphan recovery on restart
+- **Routes** — POST preflight, POST execute, GET batch, dedicated SSE invalidation channel
+- **Test harness** — Express app export via `createApp()`, Supertest-based route tests
+- **Overlay shell** — full-height Mission Control overlay with desktop/mobile layout
+- **Composer + preview** — multiline draft, teaching example, read-only preflight review
+- **Launch flow + result board** — SSE live updates with polling fallback, severity-first row sorting, open-session actions, board highlight on close
+- **Coverage** — 188 tests (up from 132), including store CRUD, parser edge cases, route contracts
+
+### 3. Architecture decisions
+
+The design is intentionally reconnect-safe: `GET /api/batches/:id` is always the source of truth. SSE only nudges the client to refetch. The overlay never blanks on reconnect — stale data stays visible while polling catches up.
+
+The overlay stays open and blocks close during active launch. When it finally closes, it passes created rows back to Mission Control as a `BatchClosePayload` so the board can highlight the launched work.
+
+### 4. Tradeoffs
+
+No frontend component tests yet — the repo has no jsdom/react-testing-library setup. All new test coverage is backend (route + unit). That is the right priority for Slice 1.
+
+The execute route tests can only verify blocked-row paths (422) because launching real tmux sessions in CI is not practical. The runner unit tests cover the execution logic with injected deps.
+
+### 5. Numbers
+
+- 9 atoms, 9 branches, 9 worktrees
+- ~2,400 lines of new code across server and frontend
+- 188 tests passing, typecheck clean, frontend build succeeds
+- Atom 9 branch (`atom/9-coverage`) has the full merged tree

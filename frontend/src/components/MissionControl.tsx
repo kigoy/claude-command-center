@@ -8,6 +8,7 @@ import { CommandPalette } from './CommandPalette';
 import { NewSprintDialog } from './NewSprintDialog';
 import { ExploreIdeaDialog } from './ExploreIdeaDialog';
 import { AddProjectDialog } from './AddProjectDialog';
+import { BatchCreateOverlay } from './BatchCreateOverlay';
 import { AnalyticsTab } from './AnalyticsTab';
 import { AlertBanner } from './AlertBanner';
 import { SettingsPage } from './SettingsPage';
@@ -37,6 +38,8 @@ export function MissionControl() {
   const [tmuxSessions, setTmuxSessions] = useState<TmuxSession[]>([]);
   const [newSprintDraft, setNewSprintDraft] = useState<NewSprintDraft | null>(null);
   const [exploreIdeaDraft, setExploreIdeaDraft] = useState<ExploreIdeaDraft | null>(null);
+  const [showBatchCreate, setShowBatchCreate] = useState(false);
+  const batchCreateTriggerRef = useRef<HTMLButtonElement>(null);
   const [showAddProject, setShowAddProject] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [selectedSprint, setSelectedSprint] = useState<string | null>(null);
@@ -352,6 +355,8 @@ export function MissionControl() {
         onNewSprint={(projectId) => setNewSprintDraft({ projectId })}
         onExploreIdea={() => setExploreIdeaDraft({})}
         onAddProject={() => setShowAddProject(true)}
+        onBatchCreate={() => setShowBatchCreate(true)}
+        batchCreateTriggerRef={batchCreateTriggerRef}
       />
 
       <main className="mc-content">
@@ -507,6 +512,17 @@ export function MissionControl() {
           existingProjectIds={data?.projects.map((p) => p.id) ?? []}
           onClose={() => setShowAddProject(false)}
           onCreated={() => { setShowAddProject(false); fetchDashboard(); }}
+        />
+      )}
+      {showBatchCreate && (
+        <BatchCreateOverlay
+          projects={data?.projects ?? []}
+          toolId={selectedToolId}
+          onClose={() => {
+            setShowBatchCreate(false);
+            // Return focus to the trigger button
+            batchCreateTriggerRef.current?.focus();
+          }}
         />
       )}
     </div>

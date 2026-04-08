@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { CliTool, DashboardData, GroupConfig, ProjectSummary, TmuxSession } from '../types';
 
 export interface OpenTerminal {
@@ -24,15 +24,20 @@ interface Props {
   onNewSprint: (projectId: string) => void;
   onExploreIdea: () => void;
   onAddProject: () => void;
+  onBatchCreate: () => void;
+  batchCreateTriggerRef?: React.RefObject<HTMLButtonElement | null>;
 }
 
 export function Sidebar({
   data, tmuxSessions, activeView, activeTerminalId, openTerminals,
   unreadSessions, cliTools, selectedToolId, onSelectTool, onSelectView, onSelectSession, onNewSprint,
-  onExploreIdea, onAddProject,
+  onExploreIdea, onAddProject, onBatchCreate, batchCreateTriggerRef,
 }: Props) {
   const groups = data?.groups ?? [];
   const projects = data?.projects ?? [];
+  // Keep a local ref so we can fall back if caller doesn't provide one
+  const localBtnRef = useRef<HTMLButtonElement>(null);
+  const btnRef = batchCreateTriggerRef ?? localBtnRef;
 
   return (
     <aside className="mc-sidebar">
@@ -50,9 +55,24 @@ export function Sidebar({
         </label>
       </div>
 
-      <button className="mc-sidebar-btn mc-sidebar-btn--primary" onClick={onExploreIdea}>
-        + Explore Idea
+      {/* Primary action: Batch Create */}
+      <button
+        ref={btnRef}
+        className="mc-sidebar-btn mc-sidebar-btn--primary"
+        onClick={onBatchCreate}
+      >
+        + Batch Create
       </button>
+
+      {/* Secondary shortcuts */}
+      <div className="mc-sidebar-shortcuts">
+        <button className="mc-sidebar-shortcut" onClick={onExploreIdea}>
+          Explore Idea
+        </button>
+        <button className="mc-sidebar-shortcut" onClick={() => onNewSprint(data?.projects[0]?.id ?? '')}>
+          + Sprint
+        </button>
+      </div>
 
       <nav className="mc-sidebar-nav">
         <button

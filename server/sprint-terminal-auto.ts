@@ -14,6 +14,8 @@ type PromptMatch = {
   signature: string;
   question: string;
   selection: string;
+  response: string;
+  submitWithEnter: boolean;
 };
 
 const handledPromptSignatures = new Map<string, string>();
@@ -79,6 +81,12 @@ function extractQuestion(block: string): string {
 }
 
 function matchPrompt(output: string): PromptMatch | null {
+  const menuPrompt = matchMenuPrompt(output);
+  if (menuPrompt) return menuPrompt;
+  return matchRecommendationPrompt(output);
+}
+
+function matchMenuPrompt(output: string): PromptMatch | null {
   const block = extractPromptBlock(output);
   if (!block) return null;
 
@@ -92,15 +100,66 @@ function matchPrompt(output: string): PromptMatch | null {
     signature: normalized,
     question: extractQuestion(block),
     selection: normalizeText(selectionMatch?.[1] || 'Option 1'),
+    response: '',
+    submitWithEnter: true,
   };
 }
 
-function sendRecommendedAnswer(sessionName: string): boolean {
+function matchRecommendationPrompt(output: string): PromptMatch | null {
+  const lines = output.split('\n').slice(-PROMPT_LINES);
+  const recommendationIndex = [...lines]
+    .map((line, index) => ({ line, index }))
+    .reverse()
+    .find(({ line }) => /RECOMMENDATION:\s+Choose\s+/i.test(line))?.index;
+
+  if (recommendationIndex === undefined) return null;
+
+  const recommendationLine = normalizeText(lines[recommendationIndex]);
+  const responseMatch = recommendationLine.match(/RECOMMENDATION:\s+Choose\s+([A-Z0-9]+)/i);
+  if (!responseMatch) return null;
+
+  const questionLine = [...lines]
+    .slice(recommendationIndex)
+    .find((line) => /What('|’)s your call|Which approach fits best|Which option fits best/i.test(line));
+  if (!questionLine) return null;
+
+  const promptLine = [...lines]
+    .slice(recommendationIndex)
+    .find((line) => /^[\s]*[❯>]\s*$/.test(normalizeText(line)));
+  if (!promptLine) return null;
+
+  const signature = normalizeText([
+    recommendationLine,
+    questionLine,
+    promptLine,
+  ].join('\n'));
+
+  return {
+    signature,
+    question: normalizeText(questionLine),
+    selection: responseMatch[1].toUpperCase(),
+    response: responseMatch[1].toUpperCase(),
+    submitWithEnter: false,
+  };
+}
+
+function sendRecommendedAnswer(sessionName: string, prompt: PromptMatch): boolean {
   try {
-    execFileSync('tmux', ['send-keys', '-t', sessionName, 'Enter'], {
-      timeout: 3000,
-      stdio: ['ignore', 'ignore', 'ignore'],
-    });
+    if (prompt.submitWithEnter) {
+      execFileSync('tmux', ['send-keys', '-t', sessionName, 'Enter'], {
+        timeout: 3000,
+        stdio: ['ignore', 'ignore', 'ignore'],
+      });
+    } else {
+      execFileSync('tmux', ['send-keys', '-t', sessionName, '-l', prompt.response], {
+        timeout: 3000,
+        stdio: ['ignore', 'ignore', 'ignore'],
+      });
+      execFileSync('tmux', ['send-keys', '-t', sessionName, 'Enter'], {
+        timeout: 3000,
+        stdio: ['ignore', 'ignore', 'ignore'],
+      });
+    }
     return true;
   } catch {
     return false;
@@ -164,7 +223,7 @@ function pollSprintTerminalPrompts(): void {
       continue;
     }
 
-    if (!sendRecommendedAnswer(session.sessionName)) {
+    if (!sendRecommendedAnswer(session.sessionName, prompt)) {
       continue;
     }
 

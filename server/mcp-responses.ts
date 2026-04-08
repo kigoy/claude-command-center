@@ -44,6 +44,12 @@ export function getRequest(requestId: string): PendingRequest | undefined {
   return store.get(requestId);
 }
 
+export function listRequests(): PendingRequest[] {
+  return [...store.values()]
+    .filter((request) => request.response === undefined)
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
 export function setResponse(requestId: string, response: string): boolean {
   const req = store.get(requestId);
   if (!req) return false;

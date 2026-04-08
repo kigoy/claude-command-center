@@ -12,11 +12,12 @@ import { AnalyticsTab } from './AnalyticsTab';
 import { AlertBanner } from './AlertBanner';
 import { SettingsPage } from './SettingsPage';
 import { UpdateToast } from './UpdateToast';
+import { PendingQuestionsPanel } from './PendingQuestionsPanel';
 import { useSprintSSE } from '../hooks/use-sprint-sse';
 import { useBoard } from '../hooks/use-board';
 import { useTerminals } from '../hooks/use-terminals';
 import { useKeyboardNav } from '../hooks/use-keyboard-nav';
-import type { DashboardData, TmuxSession } from '../types';
+import type { DashboardData, PendingQuestion, TmuxSession } from '../types';
 
 type View = 'dashboard' | 'board' | 'analytics' | 'settings';
 
@@ -33,6 +34,8 @@ export function MissionControl() {
   const [offline, setOffline] = useState(false);
   const [terminalSnippets, setTerminalSnippets] = useState<Map<string, string[]>>(new Map());
   const [actionToast, setActionToast] = useState<{ msg: string; ok: boolean } | null>(null);
+  const [pendingQuestions, setPendingQuestions] = useState<PendingQuestion[]>([]);
+  const [showPendingQuestions, setShowPendingQuestions] = useState(true);
   const failCount = useRef(0);
 
   const { columns, allSprints, doneCount, showDone, setShowDone, filter, setFilter, projectIds } = useBoard(data);
@@ -79,21 +82,35 @@ export function MissionControl() {
     } catch { /* ignore */ }
   }, []);
 
+  const fetchPendingQuestions = useCallback(async () => {
+    try {
+      const res = await fetch('/api/mcp/requests');
+      if (!res.ok) return;
+      const requests = await res.json() as PendingQuestion[];
+      setPendingQuestions(requests);
+      if (requests.length > 0) setShowPendingQuestions(true);
+    } catch {
+      // ignore
+    }
+  }, []);
+
   useEffect(() => {
     fetchDashboard();
     fetchTmux();
+    fetchPendingQuestions();
     const d = setInterval(fetchDashboard, 60_000);
     const t = setInterval(fetchTmux, 10_000);
+    const q = setInterval(fetchPendingQuestions, 5_000);
     const refresh = () => { fetchDashboard(); fetchTmux(); };
     const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
     window.addEventListener('online', refresh);
     document.addEventListener('visibilitychange', onVisible);
     return () => {
-      clearInterval(d); clearInterval(t);
+      clearInterval(d); clearInterval(t); clearInterval(q);
       window.removeEventListener('online', refresh);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [fetchDashboard, fetchTmux]);
+  }, [fetchDashboard, fetchPendingQuestions, fetchTmux]);
 
   // SSE for live sprint updates
   useSprintSSE(useCallback((event) => {
@@ -206,6 +223,22 @@ export function MissionControl() {
     setActiveTerminalId(null);
   }, [setActiveTerminalId]);
 
+
+  const handlePendingResponse = useCallback(async (requestId: string, response: string) => {
+    const res = await fetch('/api/mcp/respond', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId, response }),
+    });
+    if (!res.ok) {
+      const payload = await res.json().catch(() => null);
+      throw new Error(payload?.error || 'Failed to send response');
+    }
+    await fetchPendingQuestions();
+    setActionToast({ msg: 'Sent workflow answer', ok: true });
+    setTimeout(() => setActionToast(null), ACTION_TOAST_DURATION_MS);
+  }, [fetchPendingQuestions]);
+
   // --- Render ---
 
   const showingTerminal = activeTerminalId !== null;
@@ -222,6 +255,13 @@ export function MissionControl() {
         <div className={`action-toast action-toast--${actionToast.ok ? 'ok' : 'err'}`}>
           {actionToast.msg}
         </div>
+      )}
+      {showPendingQuestions && pendingQuestions.length > 0 && (
+        <PendingQuestionsPanel
+          requests={pendingQuestions}
+          onRespond={handlePendingResponse}
+          onDismiss={() => setShowPendingQuestions(false)}
+        />
       )}
 
       <Sidebar

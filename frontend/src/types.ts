@@ -55,6 +55,17 @@ export interface DashboardData {
   recommendation: string;
 }
 
+export interface PendingQuestion {
+  requestId: string;
+  sessionId: string;
+  question: string;
+  options: string[];
+  allowText: boolean;
+  createdAt: number;
+  sessionName: string | null;
+  toolId: string | null;
+}
+
 export interface SprintDetail {
   feature: string;
   branch: string;

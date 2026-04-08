@@ -15,7 +15,7 @@ import { setupTerminalWs, handleTerminalSSE, handleTerminalInput } from './termi
 import { sendInput } from './input.js';
 import { notifyWaiting } from './notifier.js';
 import { startStatusPolling } from './status.js';
-import { createRequest, getRequest, setResponse, getResponse } from './mcp-responses.js';
+import { createRequest, getRequest, setResponse, getResponse, listRequests } from './mcp-responses.js';
 import sprintApi from './sprint-api.js';
 import { setupSprintSSE } from './sprint-sse.js';
 import { setupTerminalSnippets } from './terminal-snippets.js';
@@ -199,6 +199,24 @@ app.get('/api/auth/check', (_req, res) => {
 });
 
 // --- MCP (cookie-authed, for web response page) ---
+
+app.get('/api/mcp/requests', (_req, res) => {
+  const requests = listRequests().map((request) => {
+    const session = request.sessionId ? getSessionFromDb(request.sessionId) : null;
+    return {
+      requestId: request.requestId,
+      sessionId: request.sessionId,
+      question: request.question,
+      options: request.options,
+      allowText: request.allowText,
+      createdAt: request.createdAt,
+      sessionName: session?.name ?? null,
+      toolId: session?.tool_id ?? null,
+    };
+  });
+
+  res.json(requests);
+});
 
 app.get('/api/mcp/requests/:requestId', (req, res) => {
   const request = getRequest(req.params.requestId);

@@ -1051,6 +1051,59 @@ textarea:focus {
   text-align: center;
 }
 
+.pending-questions-dialog {
+  width: min(560px, calc(100vw - 2rem));
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.pending-questions-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.pending-questions-count,
+.pending-questions-session {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+
+.pending-questions-body {
+  font-size: 1.05rem;
+  line-height: 1.5;
+}
+
+.pending-questions-recommended {
+  width: 100%;
+  font-weight: 600;
+}
+
+.pending-questions-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.pending-questions-option {
+  flex: 1 1 160px;
+}
+
+.pending-questions-option--recommended {
+  border-color: var(--accent, #4caf50);
+}
+
+.pending-questions-text {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.pending-questions-text input {
+  flex: 1;
+}
+
 /* Terminal */
 
 .terminal-page {

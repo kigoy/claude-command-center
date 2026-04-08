@@ -47,6 +47,7 @@ function getLastActivity(state: SprintState): string {
 interface SprintSummary {
   feature: string;
   phase: string;
+  archived?: boolean;
   blocked: boolean;
   blocked_reason: string | null;
   atoms_total: number;
@@ -141,6 +142,7 @@ function listSprintsForProject(
       sprints.push({
         feature: state.feature,
         phase: state.phase,
+        archived: (state as any).archived === true,
         blocked: state.blocked,
         blocked_reason: state.blocked_reason,
         atoms_total: atoms.total,
@@ -567,6 +569,7 @@ router.get('/sprints/:projectId/:featureId/detail', (req, res) => {
 
   res.json({
     ...state,
+    archived: (state as any).archived === true,
     atoms_total: atoms.total,
     atoms_completed: atoms.completed,
     has_atoms: atoms.has_atoms,

@@ -12,7 +12,7 @@ export function getAutoSprintAction(input: {
 
   switch (phase) {
     case 'PLAN':
-      return { command: '/autoplan', toPhase: 'BUILD', label: 'Auto It' };
+      return { command: '/office-hours', toPhase: 'PLAN', label: 'Auto It' };
     case 'BUILD':
       return { command: '/review', toPhase: 'REVIEW', label: 'Auto It' };
     case 'REVIEW':

@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { getAutoSprintAction } from '../server/sprint-auto.js';
 
 describe('getAutoSprintAction', () => {
-  it('uses autoplan for plan phase', () => {
+  it('uses office-hours for a cold-start plan phase', () => {
     expect(getAutoSprintAction({ phase: 'PLAN', qaRequired: false })).toEqual({
-      command: '/autoplan',
-      toPhase: 'BUILD',
+      command: '/office-hours',
+      toPhase: 'PLAN',
       label: 'Auto It',
     });
   });

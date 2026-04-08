@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyEvent } from 'react';
 import type { ProjectSummary } from '../types';
 
 // Mobile stepped flow states
@@ -8,6 +8,22 @@ interface Props {
   projects: ProjectSummary[];
   toolId: string;
   onClose: () => void;
+}
+
+const FOCUSABLE_SELECTOR = [
+  'button:not([disabled])',
+  '[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(', ');
+
+function getFocusableElements(root: HTMLDivElement | null): HTMLElement[] {
+  if (!root) return [];
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+    (element) => element.getClientRects().length > 0,
+  );
 }
 
 export function BatchCreateOverlay({ projects, toolId, onClose }: Props) {
@@ -24,10 +40,32 @@ export function BatchCreateOverlay({ projects, toolId, onClose }: Props) {
     return () => window.removeEventListener('keydown', handleKey);
   }, [onClose]);
 
-  // Focus trap: focus close button on mount
+  // Focus the close button on mount so keyboard users land inside the overlay.
   useEffect(() => {
     closeButtonRef.current?.focus();
   }, []);
+
+  function handleOverlayKeyDown(event: ReactKeyEvent<HTMLDivElement>) {
+    if (event.key !== 'Tab') return;
+
+    const focusable = getFocusableElements(overlayRef.current);
+    if (focusable.length === 0) return;
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+
+    if (event.shiftKey && active === first) {
+      event.preventDefault();
+      last.focus();
+      return;
+    }
+
+    if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
 
   const mobileStepLabels: MobileStep[] = ['draft', 'review', 'launch', 'results'];
 
@@ -38,6 +76,7 @@ export function BatchCreateOverlay({ projects, toolId, onClose }: Props) {
       aria-modal="true"
       aria-label="Batch Create"
       ref={overlayRef}
+      onKeyDown={handleOverlayKeyDown}
     >
       {/* Header */}
       <header className="batch-overlay__header">

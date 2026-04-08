@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { TerminalPanel } from './TerminalPanel';
@@ -33,6 +33,7 @@ type ExploreIdeaDraft = {
 
 export function MissionControl() {
   const navigate = useNavigate();
+  const missionControlRef = useRef<HTMLDivElement>(null);
   const [activeView, setActiveView] = useState<View | null>('board');
   const [data, setData] = useState<DashboardData | null>(null);
   const [tmuxSessions, setTmuxSessions] = useState<TmuxSession[]>([]);
@@ -177,6 +178,7 @@ export function MissionControl() {
   // Cmd+K command palette
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
+      if (showBatchCreate) return;
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
         setShowCommandPalette((v) => !v);
@@ -184,7 +186,33 @@ export function MissionControl() {
     }
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, []);
+  }, [showBatchCreate]);
+
+  useLayoutEffect(() => {
+    const backgroundNodes = Array.from(missionControlRef.current?.children ?? []).filter(
+      (node): node is HTMLElement => node instanceof HTMLElement && !node.classList.contains('batch-overlay'),
+    );
+
+    if (!showBatchCreate) {
+      backgroundNodes.forEach((node) => {
+        node.removeAttribute('inert');
+        node.removeAttribute('aria-hidden');
+      });
+      return;
+    }
+
+    backgroundNodes.forEach((node) => {
+      node.setAttribute('inert', '');
+      node.setAttribute('aria-hidden', 'true');
+    });
+
+    return () => {
+      backgroundNodes.forEach((node) => {
+        node.removeAttribute('inert');
+        node.removeAttribute('aria-hidden');
+      });
+    };
+  }, [showBatchCreate]);
 
   // --- Actions ---
 
@@ -323,7 +351,7 @@ export function MissionControl() {
   const ungrouped = data?.projects.filter((p) => !groupedIds.has(p.id)) ?? [];
 
   return (
-    <div className="mission-control">
+    <div className="mission-control" ref={missionControlRef}>
       {offline && <div className="offline-banner">Connection lost — retrying...</div>}
       <UpdateToast />
       <AlertBanner />
@@ -520,8 +548,9 @@ export function MissionControl() {
           toolId={selectedToolId}
           onClose={() => {
             setShowBatchCreate(false);
-            // Return focus to the trigger button
-            batchCreateTriggerRef.current?.focus();
+            requestAnimationFrame(() => {
+              batchCreateTriggerRef.current?.focus();
+            });
           }}
         />
       )}

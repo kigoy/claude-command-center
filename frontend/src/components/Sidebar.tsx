@@ -35,6 +35,7 @@ export function Sidebar({
 }: Props) {
   const groups = data?.groups ?? [];
   const projects = data?.projects ?? [];
+  const defaultProjectId = projects[0]?.id ?? null;
   // Keep a local ref so we can fall back if caller doesn't provide one
   const localBtnRef = useRef<HTMLButtonElement>(null);
   const btnRef = batchCreateTriggerRef ?? localBtnRef;
@@ -69,7 +70,13 @@ export function Sidebar({
         <button className="mc-sidebar-shortcut" onClick={onExploreIdea}>
           Explore Idea
         </button>
-        <button className="mc-sidebar-shortcut" onClick={() => onNewSprint(data?.projects[0]?.id ?? '')}>
+        <button
+          className="mc-sidebar-shortcut"
+          onClick={() => {
+            if (defaultProjectId) onNewSprint(defaultProjectId);
+          }}
+          disabled={!defaultProjectId}
+        >
           + Sprint
         </button>
       </div>

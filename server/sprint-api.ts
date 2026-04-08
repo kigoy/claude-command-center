@@ -28,6 +28,7 @@ import { appendSprintActivity, buildSprintHistory } from './sprint-history.js';
 import { getAutoSprintAction } from './sprint-auto.js';
 import { disableAutomation, enableRecommendedAutomation, isRecommendedAutomationEnabled } from './sprint-automation.js';
 import { executeSprintCommand, getSprintToolId, launchSprintTool } from './sprint-session.js';
+import { listRequests, setResponse } from './mcp-responses.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const router = Router();
@@ -629,6 +630,16 @@ function transitionSprintState(input: {
   return finalState;
 }
 
+function getPendingRecommendedRequest(projectId: string, featureId: string) {
+  return listRequests().find(
+    (request) =>
+      request.projectId === projectId
+      && request.featureId === featureId
+      && Array.isArray(request.options)
+      && request.options.length > 0,
+  ) ?? null;
+}
+
 /** POST /api/sprints/:projectId/:featureId/exec — send command to sprint tmux session */
 router.post('/sprints/:projectId/:featureId/exec', (req, res) => {
   const project = getProjects().find((p) => p.id === req.params.projectId);
@@ -749,31 +760,64 @@ router.post('/sprints/:projectId/:featureId/auto', (req, res) => {
     return;
   }
 
-  const autoAction = getAutoSprintAction({
-    phase: state.phase,
-    qaRequired: deriveChainStatus(state).qa_required,
-  });
-
-  if (!autoAction) {
-    res.status(400).json({ error: `No automatic next step is available for phase ${state.phase}` });
-    return;
-  }
-
   try {
     const autoState = enableRecommendedAutomation(state);
-    writeSprintState(sprintDir, appendSprintActivity(autoState, {
+    let nextState = appendSprintActivity(autoState, {
       ts: new Date().toISOString(),
       kind: 'status',
       title: 'Auto It enabled',
-      detail: `Will keep taking recommended workflow answers, starting with ${autoAction.command}.`,
+      detail: 'Will keep taking recommended workflow answers automatically.',
       phase: autoState.phase,
-    }));
+    });
+
+    const pendingRequest = getPendingRecommendedRequest(req.params.projectId, featureId);
+    if (pendingRequest?.options[0]) {
+      setResponse(pendingRequest.requestId, pendingRequest.options[0]);
+      nextState = appendSprintActivity(nextState, {
+        ts: new Date().toISOString(),
+        kind: 'action',
+        title: 'Accepted recommended answer',
+        detail: `Responded with ${pendingRequest.options[0]}.`,
+        phase: nextState.phase,
+      });
+      writeSprintState(sprintDir, nextState);
+      res.json({
+        phase: nextState.phase,
+        chain_status: deriveChainStatus(nextState),
+        automation_enabled: true,
+        answered_request_id: pendingRequest.requestId,
+        response: pendingRequest.options[0],
+        sent: false,
+      });
+      return;
+    }
+
+    const autoAction = getAutoSprintAction({
+      phase: state.phase,
+      qaRequired: deriveChainStatus(state).qa_required,
+    });
+
+    if (!autoAction) {
+      writeSprintState(sprintDir, nextState);
+      res.status(400).json({ error: `No automatic next step is available for phase ${state.phase}` });
+      return;
+    }
+
+    nextState = appendSprintActivity(nextState, {
+      ts: new Date().toISOString(),
+      kind: 'status',
+      title: 'Auto It next step',
+      detail: `Starting with ${autoAction.command}.`,
+      phase: nextState.phase,
+    });
+    writeSprintState(sprintDir, nextState);
+
     const result = executeSprintCommand({
       projectId: req.params.projectId,
       projectPath: project.path,
       featureId,
       sprintDir,
-      state: readSprintState(sprintDir) || autoState,
+      state: readSprintState(sprintDir) || nextState,
       command: autoAction.command,
     });
     res.json({

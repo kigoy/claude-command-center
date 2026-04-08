@@ -34,6 +34,13 @@ function startKeepalive(): void {
       }
     }
   }, 15_000);
+  keepaliveInterval.unref?.();
+}
+
+function stopKeepalive(): void {
+  if (!keepaliveInterval) return;
+  clearInterval(keepaliveInterval);
+  keepaliveInterval = null;
 }
 
 /** Broadcast a batch-changed event to all connected clients. */
@@ -50,8 +57,6 @@ export function notifyBatchChanged(batchId: string): void {
 
 /** Mount GET /api/batch-events on the app. Call once during server setup. */
 export function setupBatchEvents(app: Express): void {
-  startKeepalive();
-
   app.get('/api/batch-events', (req: Request, res: Response) => {
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -68,10 +73,12 @@ export function setupBatchEvents(app: Express): void {
 
     const client: SSEClient = { id: ++clientIdCounter, res };
     clients.push(client);
+    startKeepalive();
 
     req.on('close', () => {
       const idx = clients.indexOf(client);
       if (idx !== -1) clients.splice(idx, 1);
+      if (clients.length === 0) stopKeepalive();
     });
   });
 }

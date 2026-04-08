@@ -13,9 +13,10 @@ interface UseTerminalsReturn {
   setActiveTerminalId: (id: string | null) => void;
   openTerminals: OpenTerminal[];
   unreadSessions: Set<string>;
+  closeTerminal: (sessionId: string) => void;
   openTerminalForSession: (session: TmuxSession) => Promise<void>;
-  openTerminalByTmuxName: (tmuxName: string, cwd: string) => Promise<void>;
-  openTerminalForSprint: (name: string, cwd: string, tmuxSession?: string) => Promise<void>;
+  openTerminalByTmuxName: (tmuxName: string, cwd: string, toolId?: string) => Promise<void>;
+  openTerminalForSprint: (name: string, cwd: string, tmuxSession?: string, toolId?: string) => Promise<void>;
   handleTerminalActivity: (sessionId: string) => void;
 }
 
@@ -30,6 +31,16 @@ export function useTerminals({ data, onActivate }: UseTerminalsOptions): UseTerm
   const [unreadSessions, setUnreadSessions] = useState<Set<string>>(new Set());
   const openingTerminals = useRef(new Set<string>());
 
+  const closeTerminal = useCallback((sessionId: string) => {
+    setOpenTerminals((prev) => prev.filter((terminal) => terminal.id !== sessionId));
+    setUnreadSessions((prev) => {
+      const next = new Set(prev);
+      next.delete(sessionId);
+      return next;
+    });
+    setActiveTerminalId((prev) => (prev === sessionId ? null : prev));
+  }, []);
+
   const openTerminalForSession = useCallback(async (session: TmuxSession) => {
     const existing = openTerminals.find((t) => t.tmuxName === session.sessionName);
     if (existing) {
@@ -41,15 +52,27 @@ export function useTerminals({ data, onActivate }: UseTerminalsOptions): UseTerm
     if (openingTerminals.current.has(session.sessionName)) return;
     openingTerminals.current.add(session.sessionName);
     const project = data?.projects.find((p) => p.id === session.projectId);
+    const sprint = project?.sprints.find((s) => s.feature.replace(/^feat-/, '') === session.feature);
     try {
       const res = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: session.sessionName, cwd: project?.path || '/tmp', tmuxSession: session.sessionName }),
+        body: JSON.stringify({
+          name: session.sessionName,
+          cwd: project?.path || '/tmp',
+          tmuxSession: session.sessionName,
+          toolId: sprint?.tool_id || 'claude',
+        }),
       });
       if (res.ok) {
         const s = await res.json();
-        setOpenTerminals((prev) => [...prev, { id: s.id, name: `${session.projectId} / ${session.feature}`, tmuxName: session.sessionName }]);
+        setOpenTerminals((prev) => [...prev, {
+          id: s.id,
+          name: `${session.projectId} / ${session.feature}`,
+          tmuxName: session.sessionName,
+          toolId: s.toolId,
+          toolLabel: s.toolLabel,
+        }]);
         setActiveTerminalId(s.id);
         onActivate?.();
       }
@@ -58,7 +81,7 @@ export function useTerminals({ data, onActivate }: UseTerminalsOptions): UseTerm
     }
   }, [openTerminals, data, onActivate]);
 
-  const openTerminalByTmuxName = useCallback(async (tmuxName: string, cwd: string) => {
+  const openTerminalByTmuxName = useCallback(async (tmuxName: string, cwd: string, toolId: string = 'claude') => {
     const existing = openTerminals.find((t) => t.tmuxName === tmuxName);
     if (existing) { setActiveTerminalId(existing.id); onActivate?.(); return; }
     if (openingTerminals.current.has(tmuxName)) return;
@@ -67,11 +90,17 @@ export function useTerminals({ data, onActivate }: UseTerminalsOptions): UseTerm
       const res = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: tmuxName, cwd, tmuxSession: tmuxName }),
+        body: JSON.stringify({ name: tmuxName, cwd, tmuxSession: tmuxName, toolId }),
       });
       if (res.ok) {
         const s = await res.json();
-        setOpenTerminals((prev) => [...prev, { id: s.id, name: tmuxName, tmuxName }]);
+        setOpenTerminals((prev) => [...prev, {
+          id: s.id,
+          name: tmuxName,
+          tmuxName,
+          toolId: s.toolId,
+          toolLabel: s.toolLabel,
+        }]);
         setActiveTerminalId(s.id);
         onActivate?.();
       }
@@ -80,7 +109,12 @@ export function useTerminals({ data, onActivate }: UseTerminalsOptions): UseTerm
     }
   }, [openTerminals, onActivate]);
 
-  const openTerminalForSprint = useCallback(async (name: string, cwd: string, tmuxSession?: string) => {
+  const openTerminalForSprint = useCallback(async (
+    name: string,
+    cwd: string,
+    tmuxSession?: string,
+    toolId: string = 'claude',
+  ) => {
     const lookupName = tmuxSession || name;
     const existing = openTerminals.find((t) => t.tmuxName === lookupName);
     if (existing) {
@@ -94,6 +128,7 @@ export function useTerminals({ data, onActivate }: UseTerminalsOptions): UseTerm
     try {
       const body: Record<string, string> = { name, cwd };
       if (tmuxSession) body.tmuxSession = tmuxSession;
+      body.toolId = toolId;
       const res = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -101,7 +136,13 @@ export function useTerminals({ data, onActivate }: UseTerminalsOptions): UseTerm
       });
       if (res.ok) {
         const s = await res.json();
-        setOpenTerminals((prev) => [...prev, { id: s.id, name, tmuxName: lookupName }]);
+        setOpenTerminals((prev) => [...prev, {
+          id: s.id,
+          name,
+          tmuxName: lookupName,
+          toolId: s.toolId,
+          toolLabel: s.toolLabel,
+        }]);
         setActiveTerminalId(s.id);
         onActivate?.();
       }
@@ -121,6 +162,7 @@ export function useTerminals({ data, onActivate }: UseTerminalsOptions): UseTerm
     setActiveTerminalId,
     openTerminals,
     unreadSessions,
+    closeTerminal,
     openTerminalForSession,
     openTerminalByTmuxName,
     openTerminalForSprint,

@@ -8,3 +8,7 @@ frontend/dist/
 .env
 mcp-server/build/
 tests/fixtures/resolved-config.yaml
+.playwright-cli/
+.claude/
+.context/
+logs/

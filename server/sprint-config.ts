@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync } from 'fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'fs';
+import { join } from 'path';
 import yaml from 'js-yaml';
 
 export interface ProjectConfig {
@@ -15,6 +16,17 @@ export interface GroupConfig {
   id: string;
   label: string;
   projects: string[];
+}
+
+export interface ProjectScanCandidate {
+  id: string;
+  name: string;
+  path: string;
+  alreadyConfigured: boolean;
+  configuredProjectId: string | null;
+  hasGit: boolean;
+  hasClaudeMd: boolean;
+  hasSprints: boolean;
 }
 
 interface GstackConfig {
@@ -59,6 +71,12 @@ function loadConfig(): GstackConfig | null {
     console.warn(`[sprint-config] Failed to read ${CONFIG_PATH}: ${err.message}`);
     return null;
   }
+}
+
+function saveConfig(config: GstackConfig): void {
+  config.updated = new Date().toISOString().slice(0, 10);
+  writeFileSync(CONFIG_PATH, yaml.dump(config, { lineWidth: -1, noRefs: true }));
+  reload();
 }
 
 function parseProjects(config: GstackConfig): ProjectConfig[] {
@@ -137,9 +155,7 @@ export function addProject(
     }
   }
 
-  config.updated = new Date().toISOString().slice(0, 10);
-  writeFileSync(CONFIG_PATH, yaml.dump(config, { lineWidth: -1, noRefs: true }));
-  reload();
+  saveConfig(config);
 }
 
 /** Update a project's path in config.yaml and reload. */
@@ -148,9 +164,96 @@ export function updateProjectPath(id: string, newPath: string): void {
   if (!config) throw new Error('Could not load config.yaml');
   if (!config.projects[id]) throw new Error(`Project '${id}' not found`);
   config.projects[id].path = newPath;
-  config.updated = new Date().toISOString().slice(0, 10);
-  writeFileSync(CONFIG_PATH, yaml.dump(config, { lineWidth: -1, noRefs: true }));
-  reload();
+  saveConfig(config);
+}
+
+function setProjectGroups(config: GstackConfig, projectId: string, groupIds: string[]) {
+  const normalized = [...new Set(groupIds)].filter((groupId) => !!config.groups?.[groupId]);
+  config.groups ||= {};
+
+  for (const group of Object.values(config.groups)) {
+    group.projects = group.projects.filter((id) => id !== projectId);
+  }
+
+  for (const groupId of normalized) {
+    const group = config.groups[groupId];
+    if (!group.projects.includes(projectId)) {
+      group.projects = [...group.projects, projectId];
+    }
+  }
+}
+
+export function updateProjectConfig(
+  id: string,
+  patch: Partial<Pick<ProjectConfig, 'path' | 'stack' | 'has_deploy' | 'deploy_url' | 'default_qa_routing'>> & { groupIds?: string[] },
+): void {
+  const config = loadConfig();
+  if (!config) throw new Error('Could not load config.yaml');
+  if (!config.projects[id]) throw new Error(`Project '${id}' not found`);
+
+  const project = config.projects[id];
+  if (patch.path !== undefined) project.path = patch.path;
+  if (patch.stack !== undefined) project.stack = patch.stack;
+  if (patch.has_deploy !== undefined) project.has_deploy = patch.has_deploy;
+  if (patch.deploy_url !== undefined) project.deploy_url = patch.deploy_url || undefined;
+  if (patch.default_qa_routing !== undefined) project.default_qa_routing = patch.default_qa_routing;
+  if (patch.groupIds) setProjectGroups(config, id, patch.groupIds);
+
+  saveConfig(config);
+}
+
+export function createGroup(id: string, label: string): void {
+  const config = loadConfig();
+  if (!config) throw new Error('Could not load config.yaml');
+  config.groups ||= {};
+  if (config.groups[id]) throw new Error(`Group '${id}' already exists`);
+
+  config.groups[id] = { label, projects: [] };
+  saveConfig(config);
+}
+
+export function updateGroup(id: string, patch: { label?: string; projects?: string[] }): void {
+  const config = loadConfig();
+  if (!config) throw new Error('Could not load config.yaml');
+  if (!config.groups?.[id]) throw new Error(`Group '${id}' not found`);
+
+  if (patch.label !== undefined) {
+    config.groups[id].label = patch.label;
+  }
+  if (patch.projects !== undefined) {
+    const uniqueProjects = [...new Set(patch.projects)].filter((projectId) => !!config.projects[projectId]);
+    config.groups[id].projects = uniqueProjects;
+  }
+
+  saveConfig(config);
+}
+
+export function scanProjectCandidates(basePath = '/Volumes/Extreme Pro'): ProjectScanCandidate[] {
+  const configured = getProjects();
+  const configuredByPath = new Map(configured.map((project) => [project.path, project.id]));
+
+  try {
+    return readdirSync(basePath, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+      .map((entry) => {
+        const path = join(basePath, entry.name);
+        const configuredProjectId = configuredByPath.get(path) || null;
+        return {
+          id: entry.name.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || entry.name.toLowerCase(),
+          name: entry.name,
+          path,
+          alreadyConfigured: !!configuredProjectId,
+          configuredProjectId,
+          hasGit: existsSync(join(path, '.git')),
+          hasClaudeMd: existsSync(join(path, 'CLAUDE.md')),
+          hasSprints: existsSync(join(path, '.sprints')),
+        };
+      })
+      .filter((candidate) => candidate.hasGit || candidate.hasClaudeMd || candidate.hasSprints)
+      .sort((a, b) => Number(b.hasSprints) - Number(a.hasSprints) || Number(b.hasGit) - Number(a.hasGit) || a.name.localeCompare(b.name));
+  } catch {
+    return [];
+  }
 }
 
 // Initial load

@@ -6,11 +6,13 @@ interface Props {
   group: GroupConfig;
   projects: ProjectSummary[];
   onNewSprint: (projectId: string) => void;
-  onOpenTerminal?: (name: string, cwd: string, tmuxSession?: string) => void;
+  onOpenTerminal?: (name: string, cwd: string, tmuxSession?: string, toolId?: string) => void;
   onProjectLinked?: () => void;
+  onDeleteSprint?: (projectId: string, feature: string) => void;
+  onRemixSprint?: (projectId: string, feature: string) => void;
 }
 
-export function GroupSection({ group, projects, onNewSprint, onOpenTerminal, onProjectLinked }: Props) {
+export function GroupSection({ group, projects, onNewSprint, onOpenTerminal, onProjectLinked, onDeleteSprint, onRemixSprint }: Props) {
   const [collapsed, setCollapsed] = useState(false);
 
   const groupProjects = group.projects
@@ -44,6 +46,8 @@ export function GroupSection({ group, projects, onNewSprint, onOpenTerminal, onP
               onNewSprint={onNewSprint}
               onOpenTerminal={onOpenTerminal}
               onProjectLinked={onProjectLinked}
+              onDeleteSprint={onDeleteSprint}
+              onRemixSprint={onRemixSprint}
             />
           ))}
         </div>

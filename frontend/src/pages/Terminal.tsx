@@ -18,7 +18,6 @@ const STATUS_COLORS: Record<string, string> = {
 const WS_TIMEOUT = 5000; // Fallback to SSE after 5s
 const RECONNECT_BASE = 1000;
 const RECONNECT_MAX = 30_000; // Cap at 30s
-const HEARTBEAT_TIMEOUT = 25_000; // Expect server ping within 25s (server pings every 15s)
 
 export function Terminal() {
   const { id } = useParams<{ id: string }>();
@@ -29,8 +28,10 @@ export function Terminal() {
   const fitAddonRef = useRef<FitAddon | null>(null);
   const [status, setStatus] = useState('Connecting...');
   const [sessionName, setSessionName] = useState('');
+  const [toolLabel, setToolLabel] = useState('');
+  const [toolId, setToolId] = useState('');
   const [rocketMode, setRocketMode] = useState(false);
-  const [sessions, setSessions] = useState<{ id: string; name: string; status: string; last_activity: string }[]>([]);
+  const [sessions, setSessions] = useState<{ id: string; name: string; status: string; last_activity: string; toolLabel?: string; toolId?: string }[]>([]);
 
   useEffect(() => {
     if (!id) return;
@@ -38,6 +39,8 @@ export function Terminal() {
       .then((r) => r.ok ? r.json() : null)
       .then((s) => {
         if (s?.name) setSessionName(s.name);
+        if (s?.toolLabel) setToolLabel(s.toolLabel);
+        if (s?.toolId) setToolId(s.toolId);
         if (s) setRocketMode(!!s.rocket_mode);
       });
   }, [id]);
@@ -110,15 +113,6 @@ export function Terminal() {
       const ws = new WebSocket(`${protocol}//${location.host}/ws/terminal/${id}`);
       activeWs = ws;
       wsRef.current = ws;
-      let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
-
-      function resetHeartbeat() {
-        if (heartbeatTimer) clearTimeout(heartbeatTimer);
-        heartbeatTimer = setTimeout(() => {
-          console.log('[ws] heartbeat timeout, closing');
-          ws.close();
-        }, HEARTBEAT_TIMEOUT);
-      }
 
       const fallbackTimer = setTimeout(() => {
         if (ws.readyState !== WebSocket.OPEN) {
@@ -132,7 +126,6 @@ export function Terminal() {
         clearTimeout(fallbackTimer);
         setStatus('');
         attempt = 0;
-        resetHeartbeat();
         // Clear stale scrollback so reconnect repaints don't accumulate duplicates
         term.clear();
         ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
@@ -146,7 +139,6 @@ export function Terminal() {
         }, 100);
 
         ws.onmessage = (e) => {
-          resetHeartbeat();
           if (e.data instanceof Blob) {
             e.data.text().then((text) => term.write(text));
           } else {
@@ -175,7 +167,6 @@ export function Terminal() {
 
       ws.onclose = () => {
         clearTimeout(fallbackTimer);
-        if (heartbeatTimer) clearTimeout(heartbeatTimer);
         if (disposed) return;
 
         // Exponential backoff with jitter, capped at RECONNECT_MAX. Never give up.
@@ -219,13 +210,13 @@ export function Terminal() {
     <div className="terminal-page">
       <div className="terminal-header">
         <button onClick={() => navigate('/')}>Back</button>
-        <EditableName sessionId={id!} initialName={sessionName} />
+        <EditableName sessionId={id!} initialName={sessionName} toolLabel={toolLabel} toolId={toolId} />
         <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           {status && <span style={{ color: '#ff9800' }}>{status}</span>}
           {id && (
             <button
               className="refresh-btn"
-              title="Restart Claude with --continue"
+              title="Restart CLI session"
               onClick={() => fetch(`/api/sessions/${id}/refresh`, { method: 'POST' })}
             >
               &#x21BB;
@@ -256,7 +247,17 @@ export function Terminal() {
   );
 }
 
-function EditableName({ sessionId, initialName }: { sessionId: string; initialName: string }) {
+function EditableName({
+  sessionId,
+  initialName,
+  toolLabel,
+  toolId,
+}: {
+  sessionId: string;
+  initialName: string;
+  toolLabel?: string;
+  toolId?: string;
+}) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(initialName);
 
@@ -292,7 +293,7 @@ function EditableName({ sessionId, initialName }: { sessionId: string; initialNa
 
   return (
     <span onDoubleClick={() => setEditing(true)} style={{ cursor: 'pointer' }}>
-      {name ? `${name} (${sessionId})` : sessionId}
+      {name ? `${name} (${toolLabel || toolId || sessionId})` : (toolLabel || toolId || sessionId)}
     </span>
   );
 }

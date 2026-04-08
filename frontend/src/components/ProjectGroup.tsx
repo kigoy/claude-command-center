@@ -6,11 +6,13 @@ import type { ProjectSummary } from '../types';
 interface Props {
   project: ProjectSummary;
   onNewSprint: (projectId: string) => void;
-  onOpenTerminal?: (name: string, cwd: string, tmuxSession?: string) => void;
+  onOpenTerminal?: (name: string, cwd: string, tmuxSession?: string, toolId?: string) => void;
   onProjectLinked?: () => void;
+  onDeleteSprint?: (projectId: string, feature: string) => void;
+  onRemixSprint?: (projectId: string, feature: string) => void;
 }
 
-export function ProjectGroup({ project, onNewSprint, onOpenTerminal, onProjectLinked }: Props) {
+export function ProjectGroup({ project, onNewSprint, onOpenTerminal, onProjectLinked, onDeleteSprint, onRemixSprint }: Props) {
   const [showCompleted, setShowCompleted] = useState(false);
   const [showLink, setShowLink] = useState(false);
 
@@ -71,6 +73,8 @@ export function ProjectGroup({ project, onNewSprint, onOpenTerminal, onProjectLi
               projectId={project.id}
               projectPath={project.path}
               onOpenTerminal={onOpenTerminal}
+              onDelete={onDeleteSprint}
+              onRemix={onRemixSprint}
             />
           ))}
         </div>
@@ -92,6 +96,8 @@ export function ProjectGroup({ project, onNewSprint, onOpenTerminal, onProjectLi
                   sprint={sprint}
                   projectId={project.id}
                   projectPath={project.path}
+                  onDelete={onDeleteSprint}
+                  onRemix={onRemixSprint}
                 />
               ))}
             </div>

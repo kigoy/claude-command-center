@@ -4,7 +4,7 @@ import { getHealth, getProjectColor } from '../utils/sprint-health';
 
 interface Props {
   sprints: BoardSprint[];
-  onOpenTerminal?: (name: string, cwd: string, tmuxSession?: string) => void;
+  onOpenTerminal?: (name: string, cwd: string, tmuxSession?: string, toolId?: string) => void;
   onClose: () => void;
 }
 
@@ -45,6 +45,7 @@ export function CommandPalette({ sprints, onOpenTerminal, onClose }: Props) {
             `${s.projectId}/${s.feature}`,
             s.projectPath,
             s.tmux_session || undefined,
+            s.tool_id,
           );
           onClose();
         },
@@ -65,6 +66,7 @@ export function CommandPalette({ sprints, onOpenTerminal, onClose }: Props) {
               `${s.projectId}/${s.feature}`,
               s.projectPath,
               s.tmux_session || undefined,
+              s.tool_id,
             );
             onClose();
           },
@@ -84,6 +86,7 @@ export function CommandPalette({ sprints, onOpenTerminal, onClose }: Props) {
               `${s.projectId}/${s.feature}`,
               s.projectPath,
               s.tmux_session || undefined,
+              s.tool_id,
             );
             onClose();
           },
@@ -107,6 +110,7 @@ export function CommandPalette({ sprints, onOpenTerminal, onClose }: Props) {
             `${s.projectId}/${s.feature}`,
             s.projectPath,
             s.tmux_session || undefined,
+            s.tool_id,
           );
           onClose();
         },

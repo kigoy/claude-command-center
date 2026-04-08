@@ -4,9 +4,8 @@ import * as pty from 'node-pty';
 import type { Server } from 'http';
 import type { Request, Response } from 'express';
 import { verifyWsAuth } from './auth.js';
-import { getSession, touchSession } from './db.js';
-
-const TMUX_PREFIX = 'cc-';
+import { getSession, touchSession, updateSessionStatus } from './db.js';
+import { getSessionTmuxName, tmuxSessionExists } from './session-runtime.js';
 const TOUCH_INTERVAL = 30_000; // Throttle last_activity updates to once per 30s
 const lastTouched = new Map<string, number>();
 
@@ -37,8 +36,11 @@ function getOrSpawnPty(sessionId: string, cols = 80, rows = 24): pty.IPty | null
   const session = getSession(sessionId);
   if (!session || session.status === 'dead') return null;
 
-  // Use custom tmux session name (sprint sessions) or default cc- prefix
-  const tmuxName = session.tmux_name || `${TMUX_PREFIX}${sessionId}`;
+  const tmuxName = getSessionTmuxName(session);
+  if (!tmuxSessionExists(tmuxName)) {
+    updateSessionStatus(sessionId, 'dead');
+    return null;
+  }
   console.log('[pty] spawning for', tmuxName, `${cols}x${rows}`);
 
   const term = pty.spawn('tmux', ['attach-session', '-t', tmuxName], {
@@ -51,6 +53,9 @@ function getOrSpawnPty(sessionId: string, cols = 80, rows = 24): pty.IPty | null
   term.onExit(({ exitCode }) => {
     console.log('[pty] exited for', tmuxName, 'code:', exitCode);
     activePtys.delete(sessionId);
+    if (!tmuxSessionExists(tmuxName)) {
+      updateSessionStatus(sessionId, 'dead');
+    }
   });
 
   activePtys.set(sessionId, term);
@@ -138,7 +143,9 @@ function handleWsConnection(ws: WebSocket, sessionId: string) {
       } else if (msg.type === 'resize' && msg.cols && msg.rows) {
         term.resize(msg.cols, msg.rows);
       } else if (msg.type === 'scroll' && msg.lines) {
-        const tmuxName = `${TMUX_PREFIX}${sessionId}`;
+        const session = getSession(sessionId);
+        if (!session) return;
+        const tmuxName = getSessionTmuxName(session);
         const count = Math.abs(msg.lines);
         const key = msg.lines < 0 ? 'Up' : 'Down';
         try {

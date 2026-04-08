@@ -35,7 +35,7 @@ export function WorktreeForm({ onPayloadChange, onSuggestName }: Props) {
 
   useEffect(() => {
     if (!repo || !worktreeName) {
-      onPayloadChange({ cwd: '~', command: '' });
+      onPayloadChange({ cwd: '~' });
       return;
     }
 
@@ -45,11 +45,11 @@ export function WorktreeForm({ onPayloadChange, onSuggestName }: Props) {
     const escapedDir = worktreeDir.replace(/'/g, "'\\''");
     const escapedBranch = branch.replace(/'/g, "'\\''");
 
-    const command = `cd '${escapedMain}' && git fetch origin && git pull --ff-only && git worktree add '${escapedDir}' -b '${escapedBranch}' && cd '${escapedDir}' && claude`;
+    const bootstrapCommand = `cd '${escapedMain}' && git fetch origin && git pull --ff-only && git worktree add '${escapedDir}' -b '${escapedBranch}' && cd '${escapedDir}'`;
 
     onPayloadChange({
       cwd: repo.mainPath,
-      command,
+      bootstrapCommand,
       worktreePath: worktreeDir,
       initialPrompt: taskDesc || undefined,
       repo: repo.name,
@@ -90,7 +90,7 @@ export function WorktreeForm({ onPayloadChange, onSuggestName }: Props) {
         <textarea
           value={taskDesc}
           onChange={(e) => setTaskDesc(e.target.value)}
-          placeholder="Describe what Claude should work on..."
+          placeholder="Describe what the agent should work on..."
           rows={3}
         />
       </label>

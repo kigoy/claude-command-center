@@ -12,7 +12,7 @@ interface ToolInfo {
 /** Format tool info into a readable notification body */
 function formatBody(sessionName: string, tool?: ToolInfo): string {
   if (!tool?.tool_name) {
-    return `Claude is waiting for approval in "${sessionName}"`;
+    return `Agent is waiting for approval in "${sessionName}"`;
   }
 
   const name = tool.tool_name;

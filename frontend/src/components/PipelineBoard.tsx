@@ -11,10 +11,12 @@ interface Props {
   focusedIndex?: number | null;
   selectedSprint?: string | null;
   onSelectSprint?: (key: string | null) => void;
-  onOpenTerminal?: (name: string, cwd: string, tmuxSession?: string) => void;
+  onOpenTerminal?: (name: string, cwd: string, tmuxSession?: string, toolId?: string) => void;
   terminalSnippets?: Map<string, string[]>;
   onAction?: (projectId: string, feature: string, command: string, toPhase: string) => Promise<void>;
   onArchive?: (projectId: string, feature: string) => void;
+  onDelete?: (projectId: string, feature: string) => void;
+  onRemix?: (projectId: string, feature: string) => void;
   filter?: BoardFilter;
   onFilterChange?: (filter: BoardFilter) => void;
   projectIds?: string[];
@@ -41,6 +43,8 @@ export function PipelineBoard({
   terminalSnippets,
   onAction,
   onArchive,
+  onDelete,
+  onRemix,
   filter,
   onFilterChange,
   projectIds,
@@ -110,6 +114,8 @@ export function PipelineBoard({
                       ? (cmd, toPhase) => onAction(sprint.projectId, sprint.feature, cmd, toPhase)
                       : undefined}
                     onArchive={onArchive}
+                    onDelete={onDelete}
+                    onRemix={onRemix}
                   />
                 );
               })}

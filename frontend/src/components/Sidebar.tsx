@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
-import type { DashboardData, GroupConfig, ProjectSummary, TmuxSession } from '../types';
+import type { CliTool, DashboardData, GroupConfig, ProjectSummary, TmuxSession } from '../types';
 
 export interface OpenTerminal {
   id: string;
   name: string;
   tmuxName: string;
+  toolId: string;
+  toolLabel: string;
 }
 
 interface Props {
@@ -14,6 +16,9 @@ interface Props {
   activeTerminalId: string | null;
   openTerminals: OpenTerminal[];
   unreadSessions: Set<string>;
+  cliTools: CliTool[];
+  selectedToolId: string;
+  onSelectTool: (toolId: string) => void;
   onSelectView: (view: 'dashboard' | 'board' | 'analytics' | 'settings') => void;
   onSelectSession: (session: TmuxSession) => void;
   onNewSprint: (projectId: string) => void;
@@ -23,7 +28,7 @@ interface Props {
 
 export function Sidebar({
   data, tmuxSessions, activeView, activeTerminalId, openTerminals,
-  unreadSessions, onSelectView, onSelectSession, onNewSprint,
+  unreadSessions, cliTools, selectedToolId, onSelectTool, onSelectView, onSelectSession, onNewSprint,
   onExploreIdea, onAddProject,
 }: Props) {
   const groups = data?.groups ?? [];
@@ -33,6 +38,16 @@ export function Sidebar({
     <aside className="mc-sidebar">
       <div className="mc-sidebar-header">
         <h1 className="mc-sidebar-logo">SPRINT COMMAND</h1>
+        <label className="mc-tool-picker">
+          <span>CLI</span>
+          <select value={selectedToolId} onChange={(e) => onSelectTool(e.target.value)}>
+            {cliTools.map((tool) => (
+              <option key={tool.id} value={tool.id}>
+                {tool.label}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <button className="mc-sidebar-btn mc-sidebar-btn--primary" onClick={onExploreIdea}>
@@ -70,7 +85,7 @@ export function Sidebar({
               className={`mc-session-item${isActive ? ' mc-session-item--active' : ''}${hasUnread ? ' mc-session-item--unread' : ''}`}
               onClick={() => onSelectSession(session)}
             >
-              <span className={`mc-session-dot${session.claudeActive ? ' mc-session-dot--live' : ''}`} />
+              <span className={`mc-session-dot${session.agentActive ? ' mc-session-dot--live' : ''}`} />
               <span className="mc-session-label">
                 {session.projectId} / {session.feature}
               </span>

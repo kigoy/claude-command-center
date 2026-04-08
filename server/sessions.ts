@@ -1,4 +1,4 @@
-import { execSync, execFileSync, exec } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import { basename, dirname, join } from 'path';
 import { nanoid } from 'nanoid';
 import {
@@ -12,107 +12,112 @@ import {
   type Session,
 } from './db.js';
 import { sendInput } from './input.js';
-
-const TMUX_PREFIX = 'cc-';
-
-function tmuxSessionName(id: string) {
-  return `${TMUX_PREFIX}${id}`;
-}
-
-/** Check if a tmux session exists */
-function tmuxSessionExists(name: string): boolean {
-  try {
-    execFileSync('tmux', ['has-session', '-t', name], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-}
+import { getCliTool, listCliTools } from './cli-tools.js';
+import {
+  getSessionTmuxName,
+  launchToolInTmux,
+  respawnSessionPane,
+  shouldSendPromptOverStdin,
+  tmuxSessionExists,
+} from './session-runtime.js';
 
 interface CreateSessionOpts {
+  toolId?: string;
   worktreePath?: string;
   initialPrompt?: string;
   repo?: string;
   tmuxSession?: string;
+  bootstrapCommand?: string;
 }
 
-/** Create a new session in tmux. Defaults to `claude` but supports any command. */
+function resolveLaunchTool(toolId?: string) {
+  const effectiveToolId = toolId || 'claude';
+  const tool = getCliTool(effectiveToolId);
+  if (!tool) {
+    throw new Error(`CLI tool '${effectiveToolId}' is missing`);
+  }
+  if (!tool.enabled) {
+    throw new Error(`CLI tool '${effectiveToolId}' is disabled`);
+  }
+  return tool;
+}
+
+function queueInitialPrompt(sessionId: string, toolId: string, prompt?: string) {
+  const tool = getCliTool(toolId);
+  if (!tool || !shouldSendPromptOverStdin(tool, prompt)) return;
+  setTimeout(() => sendInput(sessionId, prompt!), 5000);
+}
+
+/** Create a new session in tmux from a stored CLI tool definition. */
 export function createSession(
   name: string,
   cwd: string,
-  command?: string,
   opts?: CreateSessionOpts,
 ): Session {
-  // Reuse existing running session with the same name
+  const toolId = opts?.toolId || 'claude';
+
+  // Reuse existing running session with the same name.
   const all = getAllSessions();
   for (const existing of all) {
     if (existing.name !== name || existing.status !== 'running') continue;
-    const tmux = existing.tmux_name || `${TMUX_PREFIX}${existing.id}`;
+    const tmux = getSessionTmuxName(existing);
     if (tmuxSessionExists(tmux)) return existing;
-    // tmux gone but DB says running — mark dead
     updateSessionStatus(existing.id, 'dead');
   }
 
   const id = nanoid(10);
 
-  // Attach to existing tmux session (sprint terminal), or recreate if dead
   if (opts?.tmuxSession) {
     if (!tmuxSessionExists(opts.tmuxSession)) {
-      // Session died — recreate and auto-start claude
-      const env = { ...process.env, CLAUDECODE: undefined, CLAUDE_CODE_ENTRYPOINT: undefined };
-      execFileSync('tmux', ['new-session', '-d', '-s', opts.tmuxSession, '-c', cwd], {
-        stdio: 'ignore', env: env as unknown as Record<string, string>,
+      const tool = resolveLaunchTool(toolId);
+      launchToolInTmux({
+        tmuxName: opts.tmuxSession,
+        cwd,
+        tool,
+        bootstrapCommand: opts.bootstrapCommand,
+        prompt: opts.initialPrompt,
       });
-      execFileSync('tmux', ['send-keys', '-t', opts.tmuxSession, '-l', 'claude --continue'], { stdio: 'ignore' });
-      execFileSync('tmux', ['send-keys', '-t', opts.tmuxSession, 'Enter'], { stdio: 'ignore' });
     }
-    insertSession(id, name, cwd);
+
+    insertSession(id, name, cwd, toolId);
     setTmuxName(id, opts.tmuxSession);
     updateSessionStatus(id, 'running');
+    if (opts?.worktreePath || opts?.repo) {
+      setSessionMeta(id, opts.worktreePath, opts.repo);
+    }
+    queueInitialPrompt(id, toolId, opts?.initialPrompt);
     return getSession(id)!;
   }
 
-  const tmuxName = tmuxSessionName(id);
+  const tool = resolveLaunchTool(toolId);
+  const tmuxName = `${tool.sessionPrefix}${id}`;
 
-  // Default to claude, but allow any TUI command
-  const shellCommand = command || 'claude';
+  launchToolInTmux({
+    tmuxName,
+    cwd,
+    tool,
+    bootstrapCommand: opts?.bootstrapCommand,
+    prompt: opts?.initialPrompt,
+  });
 
-  // Strip Claude Code env vars so nested claude sessions can start
-  const env = { ...process.env };
-  delete env.CLAUDECODE;
-  delete env.CLAUDE_CODE_ENTRYPOINT;
-
-  execFileSync('tmux', [
-    'new-session',
-    '-d',
-    '-s', tmuxName,
-    '-c', cwd,
-  ], { env });
-
-  // Send the command inside the shell so the tmux session survives if the command exits
-  execFileSync('tmux', ['send-keys', '-t', tmuxName, '-l', shellCommand]);
-  execFileSync('tmux', ['send-keys', '-t', tmuxName, 'Enter']);
-
-  insertSession(id, name, cwd);
+  insertSession(id, name, cwd, toolId);
+  setTmuxName(id, tmuxName);
   updateSessionStatus(id, 'running');
 
   if (opts?.worktreePath || opts?.repo) {
     setSessionMeta(id, opts.worktreePath, opts.repo);
   }
 
-  if (opts?.initialPrompt) {
-    setTimeout(() => sendInput(id, opts.initialPrompt!), 5000);
-  }
-
+  queueInitialPrompt(id, toolId, opts?.initialPrompt);
   return getSession(id)!;
 }
 
-/** List all sessions, syncing tmux state */
+/** List all sessions, syncing tmux state. */
 export function listSessions(): Session[] {
   const sessions = getAllSessions();
 
   for (const session of sessions) {
-    const exists = tmuxSessionExists(tmuxSessionName(session.id));
+    const exists = tmuxSessionExists(getSessionTmuxName(session));
     if (!exists && session.status !== 'dead') {
       updateSessionStatus(session.id, 'dead');
       session.status = 'dead';
@@ -122,27 +127,24 @@ export function listSessions(): Session[] {
   return sessions;
 }
 
-/** Get a single session by ID */
+/** Get a single session by ID. */
 export { getSession };
 
-/** Kill a tmux session and remove from DB */
+/** Kill a tmux session and remove from DB. */
 export function killSession(id: string): boolean {
   const session = getSession(id);
   if (!session) return false;
 
-  const tmuxName = tmuxSessionName(id);
+  const tmuxName = getSessionTmuxName(session);
   if (tmuxSessionExists(tmuxName)) {
     try {
-      // Send Ctrl+C first to gracefully stop Claude
       execFileSync('tmux', ['send-keys', '-t', tmuxName, 'C-c', '']);
-      // Small delay then kill
       execFileSync('tmux', ['kill-session', '-t', tmuxName]);
     } catch {
-      // Session may already be gone
+      // Session may already be gone.
     }
   }
 
-  // Clean up git worktree if this was a worktree session
   if (session.worktree_path) {
     try {
       const repoName = basename(dirname(session.worktree_path));
@@ -157,175 +159,68 @@ export function killSession(id: string): boolean {
   return true;
 }
 
-/** Poll a condition every `ms` until it returns true, up to `maxAttempts` times */
-function pollUntil(
-  check: () => boolean,
-  then: () => void,
-  ms: number,
-  maxAttempts: number,
-) {
-  let attempts = 0;
-  const interval = setInterval(() => {
-    attempts++;
-    if (attempts > maxAttempts) {
-      clearInterval(interval);
-      console.log('[refresh] polling timed out');
-      return;
-    }
-    try {
-      if (check()) {
-        clearInterval(interval);
-        then();
-      }
-    } catch (err) {
-      // Don't give up on transient errors, just log and retry
-      console.log('[refresh] poll error:', err);
-    }
-  }, ms);
-}
-
-function isPaneReady(tmuxName: string): 'dead' | 'prompt' | 'waiting' {
-  try {
-    const paneState = execSync(
-      `tmux list-panes -t ${tmuxName} -F '#{pane_dead}'`,
-      { encoding: 'utf-8', timeout: 3000 },
-    ).trim();
-    if (paneState === '1') return 'dead';
-
-    const output = execSync(
-      `tmux capture-pane -t ${tmuxName} -p | tail -3`,
-      { encoding: 'utf-8', timeout: 3000 },
-    );
-    if (/[$%❯]\s*$/.test(output.trim())) return 'prompt';
-  } catch { /* ignore */ }
-  return 'waiting';
-}
-
-function sendContinueCommand(tmuxName: string) {
-  execFileSync('tmux', ['send-keys', '-t', tmuxName, '-l', '--', 'claude --continue']);
-  execFileSync('tmux', ['send-keys', '-t', tmuxName, 'Enter']);
-}
-
-/** Restart Claude Code in an existing tmux session with --continue */
+/** Restart a session using its stored tool definition. */
 export function refreshSession(id: string): boolean {
   const session = getSession(id);
   if (!session) return false;
 
-  const tmuxName = tmuxSessionName(id);
-  const cwd = session.cwd === '~' ? '' : session.cwd;
-
-  // Revive dead sessions: create a new tmux session and run claude --continue
-  if (!tmuxSessionExists(tmuxName)) {
-    try {
-      const args = ['new-session', '-d', '-s', tmuxName];
-      if (cwd) args.push('-c', cwd);
-      execFileSync('tmux', args);
-
-      // Short delay for shell to initialize, then send claude --continue
-      // Can't use pollUntil here because the terminal WebSocket attaches to the pane
-      // immediately after we return, which makes isPaneReady see the attach output
-      setTimeout(() => {
-        console.log('[revive] sending claude --continue');
-        execFileSync('tmux', ['send-keys', '-t', tmuxName, '-l', '--', 'unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT && claude --continue']);
-        execFileSync('tmux', ['send-keys', '-t', tmuxName, 'Enter']);
-      }, 1500);
-
-      updateSessionStatus(id, 'running');
-      return true;
-    } catch (err) {
-      console.error('[revive] failed to create tmux session:', err);
-      return false;
-    }
-  }
+  const tool = resolveLaunchTool(session.tool_id);
+  const tmuxName = getSessionTmuxName(session);
+  const cwd = session.cwd === '~' ? process.env.HOME || '~' : session.cwd;
 
   try {
-    // Keep the pane alive after Claude exits (for old-style sessions where Claude IS the process)
+    if (!tmuxSessionExists(tmuxName)) {
+      launchToolInTmux({ tmuxName, cwd, tool });
+      setTmuxName(id, tmuxName);
+      updateSessionStatus(id, 'running');
+      return true;
+    }
+
     execFileSync('tmux', ['set-option', '-t', tmuxName, 'remain-on-exit', 'on']);
-    // Ctrl+C to cancel any in-progress operation, then /exit to quit
-    execFileSync('tmux', ['send-keys', '-t', tmuxName, 'C-c', '']);
-  } catch {
+    respawnSessionPane({ tmuxName, cwd, tool });
+    updateSessionStatus(id, 'running');
+    return true;
+  } catch (err) {
+    console.error('[refresh] failed to restart session:', err);
     return false;
   }
-
-  // Step 1: Wait 1s for Ctrl+C to land, then send /exit
-  setTimeout(() => {
-    try {
-      execFileSync('tmux', ['send-keys', '-t', tmuxName, '-l', '--', '/exit']);
-      execFileSync('tmux', ['send-keys', '-t', tmuxName, 'Enter']);
-    } catch { return; }
-
-    // Step 2: Poll until Claude has exited (pane dead or shell prompt)
-    pollUntil(
-      () => isPaneReady(tmuxName) !== 'waiting',
-      () => {
-        const state = isPaneReady(tmuxName);
-        console.log('[refresh] Claude exited, pane state:', state);
-
-        if (state === 'dead') {
-          // Old-style session: respawn pane with a shell
-          // Explicit shell command prevents respawn-pane from re-running the original command
-          const shell = process.env.SHELL || '/bin/bash';
-          const args = ['respawn-pane', '-k', '-t', tmuxName];
-          if (cwd) args.push('-c', cwd);
-          args.push(shell);
-          execFileSync('tmux', args);
-          execFileSync('tmux', ['set-option', '-t', tmuxName, 'remain-on-exit', 'off']);
-
-          // Step 3: Wait for the new shell to be ready, then send claude --continue
-          pollUntil(
-            () => isPaneReady(tmuxName) === 'prompt',
-            () => {
-              console.log('[refresh] shell ready, sending claude --continue');
-              sendContinueCommand(tmuxName);
-            },
-            500,
-            20, // 10s
-          );
-        } else {
-          // New-style session: already at shell prompt
-          execFileSync('tmux', ['set-option', '-t', tmuxName, 'remain-on-exit', 'off']);
-          console.log('[refresh] at prompt, sending claude --continue');
-          sendContinueCommand(tmuxName);
-        }
-      },
-      1000,
-      30, // 30s max wait for Claude to exit (/exit can be slow)
-    );
-  }, 1000);
-
-  return true;
 }
 
-/** Sync DB with tmux on startup — mark dead sessions, adopt orphans */
+function recoverOrphanSessions() {
+  const toolsByPrefix = listCliTools().map((tool) => ({ toolId: tool.id, prefix: tool.sessionPrefix }));
+
+  try {
+    const output = execSync('tmux list-sessions -F "#{session_name}"', {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const tmuxSessions = output.trim().split('\n').filter(Boolean);
+
+    for (const name of tmuxSessions) {
+      const match = toolsByPrefix.find((tool) => name.startsWith(tool.prefix));
+      if (!match) continue;
+      const id = name.slice(match.prefix.length);
+      if (!id || getSession(id)) continue;
+      insertSession(id, `recovered-${id}`, '~', match.toolId);
+      setTmuxName(id, name);
+      updateSessionStatus(id, 'running');
+    }
+  } catch {
+    // No tmux server running.
+  }
+}
+
+/** Sync DB with tmux on startup — mark dead sessions, adopt orphans. */
 export function syncSessionsWithTmux() {
   const sessions = getAllSessions();
 
-  // Mark sessions whose tmux is gone as dead
   for (const session of sessions) {
-    if (!tmuxSessionExists(tmuxSessionName(session.id))) {
+    if (!tmuxSessionExists(getSessionTmuxName(session))) {
       updateSessionStatus(session.id, 'dead');
     } else if (session.status === 'dead' || session.status === 'starting') {
       updateSessionStatus(session.id, 'running');
     }
   }
 
-  // Find orphaned tmux sessions (our prefix but not in DB)
-  try {
-    const output = execSync('tmux list-sessions -F "#{session_name}"', {
-      encoding: 'utf-8',
-    });
-    const tmuxSessions = output.trim().split('\n').filter(Boolean);
-
-    for (const name of tmuxSessions) {
-      if (!name.startsWith(TMUX_PREFIX)) continue;
-      const id = name.slice(TMUX_PREFIX.length);
-      if (!getSession(id)) {
-        // Orphaned tmux session — add it back to DB
-        insertSession(id, `recovered-${id}`, '~');
-        updateSessionStatus(id, 'running');
-      }
-    }
-  } catch {
-    // No tmux server running — that's fine
-  }
+  recoverOrphanSessions();
 }

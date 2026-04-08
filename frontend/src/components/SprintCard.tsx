@@ -9,7 +9,9 @@ interface Props {
   sprint: SprintSummary;
   projectId: string;
   projectPath: string;
-  onOpenTerminal?: (name: string, cwd: string, tmuxSession?: string) => void;
+  onOpenTerminal?: (name: string, cwd: string, tmuxSession?: string, toolId?: string) => void;
+  onDelete?: (projectId: string, feature: string) => void;
+  onRemix?: (projectId: string, feature: string) => void;
 }
 
 /** Live counter showing time in current phase */
@@ -43,7 +45,7 @@ function PhaseDetailView({ entry }: { entry: PhaseHistoryEntry }) {
   );
 }
 
-export function SprintCard({ sprint, projectId, projectPath, onOpenTerminal }: Props) {
+export function SprintCard({ sprint, projectId, projectPath, onOpenTerminal, onDelete, onRemix }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<SprintDetail | null>(null);
   const [pickedPhase, setPickedPhase] = useState<Phase | null>(null);
@@ -68,7 +70,25 @@ export function SprintCard({ sprint, projectId, projectPath, onOpenTerminal }: P
     if (!onOpenTerminal) return;
     const name = `${projectId}/${sprint.feature}`;
     // Always pass tmux_session — server recreates dead sessions silently
-    onOpenTerminal(name, projectPath, sprint.tmux_session || undefined);
+    onOpenTerminal(name, projectPath, sprint.tmux_session || undefined, sprint.tool_id);
+  }
+
+  function handleDelete() {
+    if (!onDelete) return;
+    const name = `${projectId}/${sprint.feature.replace(/^feat-/, '')}`;
+    if (!window.confirm(`Delete sprint ${name}? This removes the sprint folder and kills its tmux session if it is running.`)) {
+      return;
+    }
+    onDelete(projectId, sprint.feature);
+  }
+
+  function handleRemix() {
+    if (!onRemix) return;
+    const name = `${projectId}/${sprint.feature.replace(/^feat-/, '')}`;
+    if (!window.confirm(`Remix sprint ${name}? This deletes the current sprint and reopens the original creation flow with the same prompt.`)) {
+      return;
+    }
+    onRemix(projectId, sprint.feature);
   }
 
   const historyForStepper = detail ? detail.phase_history : [];
@@ -144,6 +164,8 @@ export function SprintCard({ sprint, projectId, projectPath, onOpenTerminal }: P
             projectPath={projectPath}
             branch={sprint.branch}
             tmuxSession={sprint.tmux_session}
+            onDelete={onDelete ? handleDelete : undefined}
+            onRemix={onRemix ? handleRemix : undefined}
           />
         </div>
       </div>

@@ -1,0 +1,15 @@
+{
+  "feature": "feat-sprint-visualization",
+  "branch": "main",
+  "created": "2026-04-06T15:55:45.110Z",
+  "phase": "PLAN",
+  "phase_history": [
+    {
+      "phase": "PLAN",
+      "entered": "2026-04-06T15:55:45.110Z"
+    }
+  ],
+  "qa_routing": {},
+  "blocked": false,
+  "blocked_reason": null
+}

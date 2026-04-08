@@ -15,13 +15,15 @@ export interface SprintCreatedResult {
 interface Props {
   projects: ProjectOption[];
   defaultProjectId?: string;
+  initialFeatureName?: string;
+  toolId: string;
   onClose: () => void;
   onCreated: (result?: SprintCreatedResult) => void;
 }
 
-export function NewSprintDialog({ projects, defaultProjectId, onClose, onCreated }: Props) {
+export function NewSprintDialog({ projects, defaultProjectId, initialFeatureName, toolId, onClose, onCreated }: Props) {
   const [projectId, setProjectId] = useState(defaultProjectId || projects[0]?.id || '');
-  const [featureName, setFeatureName] = useState('');
+  const [featureName, setFeatureName] = useState(initialFeatureName || '');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -40,7 +42,7 @@ export function NewSprintDialog({ projects, defaultProjectId, onClose, onCreated
       const res = await fetch('/api/sprints', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, featureName: trimmed }),
+        body: JSON.stringify({ projectId, featureName: trimmed, toolId }),
       });
 
       if (res.ok) {

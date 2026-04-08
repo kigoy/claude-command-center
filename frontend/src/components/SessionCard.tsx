@@ -12,6 +12,8 @@ interface Props {
     last_activity: string;
     pane_title: string | null;
     rocket_mode: number;
+    toolId: string;
+    toolLabel: string;
   };
   onKill: () => void;
   onRefresh: () => void;
@@ -73,6 +75,7 @@ export function SessionCard({ session, onKill, onRefresh, onQuickAction }: Props
         <p className="session-pane-title">{session.pane_title}</p>
       )}
       <p className="session-cwd">{session.cwd}</p>
+      <p className="session-tool">{session.toolLabel} ({session.toolId})</p>
       <p className="session-status">{session.status}</p>
       <p className="session-time">
         {new Date(session.last_activity + 'Z').toLocaleString()}
@@ -83,7 +86,7 @@ export function SessionCard({ session, onKill, onRefresh, onQuickAction }: Props
         <button
           className="refresh-btn"
           onClick={onRefresh}
-          title="Restart Claude with --continue"
+          title="Restart CLI session"
         >
           &#x21BB;
         </button>

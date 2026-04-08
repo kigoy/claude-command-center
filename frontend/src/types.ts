@@ -1,5 +1,27 @@
 /** Shared types for the sprint dashboard */
 
+export interface CliToolStatusDetection {
+  runningPatterns: string[];
+  waitingPatterns: string[];
+  deadPatterns: string[];
+}
+
+export interface CliTool {
+  id: string;
+  label: string;
+  command: string;
+  args: string[];
+  sessionPrefix: string;
+  enabled: boolean;
+  builtIn: boolean;
+  sortOrder: number;
+  promptMode: 'none' | 'stdin' | 'arg';
+  promptArgTemplate: string | null;
+  statusDetection: CliToolStatusDetection | null;
+  env: Record<string, string> | null;
+  notes: string | null;
+}
+
 export interface ChainStatus {
   plan_done: boolean;
   review_done: boolean;
@@ -10,6 +32,7 @@ export interface ChainStatus {
 export interface SprintSummary {
   feature: string;
   phase: string;
+  archived?: boolean;
   blocked: boolean;
   blocked_reason: string | null;
   atoms_total: number;
@@ -19,6 +42,7 @@ export interface SprintSummary {
   branch: string;
   tmux_session: string;
   tmux_active: boolean;
+  tool_id: string;
   chain_status: ChainStatus;
   suggestions?: string[];
   created: string;
@@ -71,7 +95,9 @@ export interface SprintDetail {
   branch: string;
   created: string;
   phase: string;
+  archived?: boolean;
   phase_history: PhaseHistoryEntry[];
+  activity_history: SprintHistoryEvent[];
   qa_routing: Record<string, unknown>;
   blocked: boolean;
   blocked_reason: string | null;
@@ -80,8 +106,43 @@ export interface SprintDetail {
   has_atoms: boolean;
   tmux_session: string;
   tmux_active: boolean;
+  tool_id: string;
   chain_status: ChainStatus;
   learnings?: string[];
+}
+
+export interface SprintReviewFinding {
+  severity: 'info' | 'warning' | 'error';
+  code: string;
+  message: string;
+}
+
+export interface SprintReviewReport {
+  status: 'green' | 'amber' | 'red';
+  still_valid: boolean;
+  started: boolean;
+  state_correct: boolean;
+  summary: string;
+  checked_at: string;
+  facts: {
+    phase: string;
+    last_activity: string;
+    history_entries: number;
+    open_phase_entries: number;
+    tmux_active: boolean;
+    has_atoms: boolean;
+    atoms_total: number;
+  };
+  findings: SprintReviewFinding[];
+}
+
+export interface SprintHistoryEvent {
+  ts: string;
+  kind: 'system' | 'action' | 'status' | 'implementation';
+  title: string;
+  detail?: string;
+  phase?: string;
+  source: 'activity' | 'phase' | 'derived';
 }
 
 export interface PhaseHistoryEntry {
@@ -110,5 +171,5 @@ export interface TmuxSession {
   sessionName: string;
   projectId: string;
   feature: string;
-  claudeActive: boolean;
+  agentActive: boolean;
 }

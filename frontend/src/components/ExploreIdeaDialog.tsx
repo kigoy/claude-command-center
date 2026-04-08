@@ -6,16 +6,33 @@ type Mode = 'existing' | 'new';
 interface Props {
   groups: GroupConfig[];
   projects: ProjectSummary[];
+  toolId: string;
+  initialMode?: Mode;
+  initialName?: string;
+  initialDescription?: string;
+  initialProjectId?: string;
+  initialGroupId?: string;
   onClose: () => void;
   onCreated: (result: { session: string; path: string }) => void;
 }
 
-export function ExploreIdeaDialog({ groups, projects, onClose, onCreated }: Props) {
-  const [mode, setMode] = useState<Mode>('existing');
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [projectId, setProjectId] = useState(projects[0]?.id ?? '');
-  const [groupId, setGroupId] = useState(groups[0]?.id ?? '');
+export function ExploreIdeaDialog({
+  groups,
+  projects,
+  toolId,
+  initialMode,
+  initialName,
+  initialDescription,
+  initialProjectId,
+  initialGroupId,
+  onClose,
+  onCreated,
+}: Props) {
+  const [mode, setMode] = useState<Mode>(initialMode || 'existing');
+  const [name, setName] = useState(initialName || '');
+  const [description, setDescription] = useState(initialDescription || '');
+  const [projectId, setProjectId] = useState(initialProjectId || projects[0]?.id || '');
+  const [groupId, setGroupId] = useState(initialGroupId || groups[0]?.id || '');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -29,8 +46,8 @@ export function ExploreIdeaDialog({ groups, projects, onClose, onCreated }: Prop
     setSubmitting(true);
     try {
       const body = mode === 'existing'
-        ? { name: slug, description: description.trim(), projectId }
-        : { name: slug, description: description.trim(), group: groupId };
+        ? { name: slug, description: description.trim(), projectId, toolId }
+        : { name: slug, description: description.trim(), group: groupId, toolId };
 
       const res = await fetch('/api/explore-idea', {
         method: 'POST',

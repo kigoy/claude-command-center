@@ -6,7 +6,7 @@ interface UseKeyboardNavParams {
   totalCardCount: number;
   activeView: string | null;
   activeTerminalId: string | null;
-  onOpenTerminal: (name: string, cwd: string, tmuxSession?: string) => void;
+  onOpenTerminal: (name: string, cwd: string, tmuxSession?: string, toolId?: string) => void;
   onEscapeTerminal: () => void;
 }
 
@@ -121,6 +121,7 @@ export function useKeyboardNav({
                   `${sprint.projectId}/${sprint.feature}`,
                   sprint.projectPath,
                   sprint.tmux_session || undefined,
+                  sprint.tool_id,
                 );
                 break;
               }

@@ -6,13 +6,15 @@ import type { Health } from '../utils/sprint-health';
 
 interface Props {
   sprint: BoardSprint;
-  onOpenTerminal?: (name: string, cwd: string, tmuxSession?: string) => void;
+  onOpenTerminal?: (name: string, cwd: string, tmuxSession?: string, toolId?: string) => void;
   onSelect?: () => void;
   selected?: boolean;
   focused?: boolean;
   terminalSnippet?: string[];
   onAction?: (command: string, toPhase: string) => Promise<void>;
   onArchive?: (projectId: string, feature: string) => void;
+  onDelete?: (projectId: string, feature: string) => void;
+  onRemix?: (projectId: string, feature: string) => void;
 }
 
 interface PhaseAction {
@@ -177,7 +179,7 @@ function BoardCardTimeline({ phaseHistory, created, isComplete }: {
   );
 }
 
-export function BoardCard({ sprint, onOpenTerminal, onSelect, selected, focused, terminalSnippet, onAction, onArchive }: Props) {
+export function BoardCard({ sprint, onOpenTerminal, onSelect, selected, focused, terminalSnippet, onAction, onArchive, onDelete, onRemix }: Props) {
   const health: Health = getHealth(sprint);
   const healthColor = HEALTH_COLORS[health];
   const projectColor = getProjectColor(sprint.projectId);
@@ -208,7 +210,7 @@ export function BoardCard({ sprint, onOpenTerminal, onSelect, selected, focused,
     e.stopPropagation();
     if (!onOpenTerminal) return;
     const name = `${sprint.projectId}/${sprint.feature}`;
-    onOpenTerminal(name, sprint.projectPath, sprint.tmux_session || undefined);
+    onOpenTerminal(name, sprint.projectPath, sprint.tmux_session || undefined, sprint.tool_id);
   }
 
   function handleAction(e: React.MouseEvent) {
@@ -222,6 +224,26 @@ export function BoardCard({ sprint, onOpenTerminal, onSelect, selected, focused,
     setConfirmingShip(false);
     setActionPending(true);
     onAction(action.command, action.toPhase).finally(() => setActionPending(false));
+  }
+
+  function handleDelete(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!onDelete) return;
+    const name = `${sprint.projectId}/${sprint.feature.replace(/^feat-/, '')}`;
+    if (!window.confirm(`Delete sprint ${name}? This removes the sprint folder and kills its tmux session if it is running.`)) {
+      return;
+    }
+    onDelete(sprint.projectId, sprint.feature);
+  }
+
+  function handleRemix(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!onRemix) return;
+    const name = `${sprint.projectId}/${sprint.feature.replace(/^feat-/, '')}`;
+    if (!window.confirm(`Remix sprint ${name}? This deletes the current sprint and reopens the original creation flow with the same prompt.`)) {
+      return;
+    }
+    onRemix(sprint.projectId, sprint.feature);
   }
 
   return (
@@ -311,6 +333,27 @@ export function BoardCard({ sprint, onOpenTerminal, onSelect, selected, focused,
           >
             Archive
           </button>
+        </div>
+      )}
+
+      {(onDelete || onRemix) && (
+        <div className="board-card-footer" onClick={(e) => e.stopPropagation()}>
+          {onRemix && (
+            <button
+              className="board-card-remix-btn"
+              onClick={handleRemix}
+            >
+              Remix
+            </button>
+          )}
+          {onDelete && (
+            <button
+              className="board-card-delete-btn"
+              onClick={handleDelete}
+            >
+              Delete
+            </button>
+          )}
         </div>
       )}
 

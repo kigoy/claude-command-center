@@ -4,6 +4,8 @@ import { GitCloneForm } from './templates/GitCloneForm';
 import { WorktreeForm } from './templates/WorktreeForm';
 
 interface Props {
+  selectedToolId: string;
+  selectedToolLabel?: string;
   onClose: () => void;
   onCreated: () => void;
 }
@@ -16,11 +18,11 @@ const templates = [
 
 type TemplateId = (typeof templates)[number]['id'];
 
-export function NewSessionDialog({ onClose, onCreated }: Props) {
+export function NewSessionDialog({ selectedToolId, selectedToolLabel, onClose, onCreated }: Props) {
   const [template, setTemplate] = useState<TemplateId>('directory');
   const [name, setName] = useState('');
   const [nameManual, setNameManual] = useState(false);
-  const [payload, setPayload] = useState<TemplatePayload>({ cwd: '~', command: 'claude' });
+  const [payload, setPayload] = useState<TemplatePayload>({ cwd: '~' });
   const [rocketMode, setRocketMode] = useState(false);
   const [error, setError] = useState('');
 
@@ -42,7 +44,8 @@ export function NewSessionDialog({ onClose, onCreated }: Props) {
       body: JSON.stringify({
         name,
         cwd: payload.cwd,
-        command: payload.command || undefined,
+        toolId: selectedToolId,
+        bootstrapCommand: payload.bootstrapCommand,
         worktreePath: payload.worktreePath,
         initialPrompt: payload.initialPrompt,
         repo: payload.repo,
@@ -66,6 +69,7 @@ export function NewSessionDialog({ onClose, onCreated }: Props) {
         onSubmit={handleSubmit}
       >
         <h2>New Session</h2>
+        <p className="session-tool-hint">New sessions use {selectedToolLabel || selectedToolId}.</p>
 
         <div className="template-selector">
           {templates.map((t) => (

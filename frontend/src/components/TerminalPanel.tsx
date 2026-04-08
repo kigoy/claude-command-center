@@ -6,16 +6,16 @@ import '@xterm/xterm/css/xterm.css';
 
 const RECONNECT_BASE = 1000;
 const RECONNECT_MAX = 30_000;
-const HEARTBEAT_TIMEOUT = 25_000;
 
 interface Props {
   sessionId: string;
   visible: boolean;
   onActivity?: () => void;
+  onSessionClosed?: (sessionId: string) => void;
 }
 
 /** Embeddable terminal panel — stays mounted while hidden, reconnects on visibility. */
-export function TerminalPanel({ sessionId, visible, onActivity }: Props) {
+export function TerminalPanel({ sessionId, visible, onActivity, onSessionClosed }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -24,6 +24,8 @@ export function TerminalPanel({ sessionId, visible, onActivity }: Props) {
   // Keep onActivity in a ref to avoid stale closures in the WebSocket handler
   const onActivityRef = useRef(onActivity);
   useEffect(() => { onActivityRef.current = onActivity; }, [onActivity]);
+  const onSessionClosedRef = useRef(onSessionClosed);
+  useEffect(() => { onSessionClosedRef.current = onSessionClosed; }, [onSessionClosed]);
 
   // Refit + repaint when becoming visible
   useEffect(() => {
@@ -64,23 +66,28 @@ export function TerminalPanel({ sessionId, visible, onActivity }: Props) {
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let dataDisposable: { dispose(): void } | null = null;
     let handleResize: (() => void) | null = null;
+    let closedForGood = false;
+
+    async function sessionIsGone() {
+      try {
+        const res = await fetch(`/api/sessions/${sessionId}`);
+        if (!res.ok) return true;
+        const session = await res.json();
+        return session?.status === 'dead';
+      } catch {
+        return false;
+      }
+    }
 
     function connectWs(attempt = 0) {
-      if (disposed) return;
+      if (disposed || closedForGood) return;
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
       const ws = new WebSocket(`${protocol}//${location.host}/ws/terminal/${sessionId}`);
       activeWs = ws;
       wsRef.current = ws;
-      let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
-
-      const resetHeartbeat = () => {
-        if (heartbeatTimer) clearTimeout(heartbeatTimer);
-        heartbeatTimer = setTimeout(() => ws.close(), HEARTBEAT_TIMEOUT);
-      };
 
       ws.onopen = () => {
         attempt = 0;
-        resetHeartbeat();
         term.clear();
         ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
         setTimeout(() => {
@@ -91,7 +98,6 @@ export function TerminalPanel({ sessionId, visible, onActivity }: Props) {
         }, 100);
 
         ws.onmessage = (e) => {
-          resetHeartbeat();
           onActivityRef.current?.();
           if (e.data instanceof Blob) {
             e.data.text().then((t) => term.write(t));
@@ -118,9 +124,15 @@ export function TerminalPanel({ sessionId, visible, onActivity }: Props) {
         }
       };
 
-      ws.onclose = () => {
-        if (heartbeatTimer) clearTimeout(heartbeatTimer);
+      ws.onclose = async (event) => {
         if (disposed) return;
+        const shouldClose = event.code === 4004 || await sessionIsGone();
+        if (disposed) return;
+        if (shouldClose) {
+          closedForGood = true;
+          onSessionClosedRef.current?.(sessionId);
+          return;
+        }
         const delay = Math.min(RECONNECT_BASE * Math.pow(2, attempt), RECONNECT_MAX);
         reconnectTimer = setTimeout(() => connectWs(attempt + 1), delay * (0.5 + Math.random() * 0.5));
       };

@@ -1,92 +1,130 @@
-# Claude Command Center
+# Sprint Command Center
 
-A web-based command center for managing [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI sessions through your browser. Spawn, monitor, and interact with multiple sessions from any device.
+Sprint Command Center is a tmux-backed control plane for running parallel software sprints across multiple projects and multiple coding CLIs.
 
-Built to run on a home server (e.g. Mac Mini) and accessed remotely over [Tailscale](https://tailscale.com).
+It combines:
+- a browser dashboard for sprint state, alerts, analytics, and terminal access
+- a gstack-based workflow engine for PLAN -> BUILD -> REVIEW -> QA -> SHIP
+- a tool registry for Claude Code, GitHub Copilot, Gemini CLI, and custom terminal tools
+- a frontend approval/question loop so agents can keep moving until a real decision is required
 
-![Dashboard](docs/screenshots/dashboard.png)
+## What it does
 
-## Features
+- Tracks projects from your gstack config and reads sprint state from each project's `.sprints/` directory
+- Launches coding tools inside tmux and keeps those sessions durable across browser refreshes
+- Lets you create sprints, explore ideas, archive finished work, delete dead ends, remix abandoned attempts, and review sprint health
+- Surfaces sprint history, phase progress, stale/blocker alerts, and lightweight analytics in one board
+- Stores per-session tool metadata in SQLite so reopening a terminal uses the right CLI, not just a Claude default
+- Shows unresolved workflow questions directly in Mission Control with a recommended first answer
 
-- **Multi-session management** — create, monitor, and kill sessions from a dashboard
-- **Browser-based terminal** — full xterm.js terminal with color, resize, and clickable links
-- **Git worktree workflow** — clone repos, create feature worktrees, and assign tasks to Claude
-- **Dashboard grouping** — sessions are grouped by repository for easy navigation
-- **Durable sessions via tmux** — sessions survive server restarts; SSH in and `tmux attach` as fallback
-- **Dual transport** — WebSocket with automatic SSE fallback for slow/unreliable networks
-- **Status detection** — polls tmux pane content to show session state (idle, running, waiting)
-- **Quick actions** — approve, reject, or send custom input to sessions without opening the terminal
-- **Push notifications** — get notified on your phone when Claude needs input (via ntfy)
-- **Simple auth** — passphrase + signed cookie (designed for use behind Tailscale)
-- **Mobile-friendly** — responsive layout, works on iPhone Safari
+## Core concepts
 
-## Screenshots
+### Projects
 
-### Terminal
+Projects come from `GSTACK_CONFIG` and can also be edited from the Settings page. Project/group configuration is stored in the gstack YAML, while runtime session metadata lives in SQLite.
 
-Click a session card to open a full browser-based terminal powered by xterm.js.
+### Sprints
 
-![Terminal](docs/screenshots/terminal.png)
+Each sprint lives in a project's `.sprints/<feature>/` directory and is driven by:
+- `STATE.json`
+- `ATOMS.md` when present
+- optional project guidance from `CLAUDE.md` or `AGENTS.md`
 
-### Session templates
+Sprint Command reads that state, renders it on the board, and drives workflow actions through tmux-backed CLI sessions.
 
-Create sessions in three ways:
+### Tools
 
-**Directory** — point Claude at any directory on your server.
+The app ships with built-in profiles for:
+- Claude Code
+- GitHub Copilot CLI
+- Gemini CLI
 
-**Git Clone** — clone a repo into a worktree-friendly structure (`repo/repo-main/`) and start Claude in it.
+You can also add custom CLI tools in Settings. Each tool defines:
+- launch command and args
+- session prefix
+- prompt delivery mode
+- optional status detection patterns
+- optional environment variables
 
-![Git Clone](docs/screenshots/new-session-git-clone.png)
+More detail: [docs/cli-tool-registry.md](docs/cli-tool-registry.md)
 
-**Worktree** — select a previously cloned repo, name a feature branch, and optionally describe the task. Claude starts in a new git worktree and receives your task description as its initial prompt.
+## Operator model
 
-![Worktree](docs/screenshots/new-session-worktree.png)
+Sprint Command is designed to be autonomous by default:
+- agents should continue the workflow without waiting for manual nudges
+- only real decision points should interrupt execution
+- when input is needed, the frontend shows the question and a recommended option first
+
+That behavior is reinforced in [SPRINT_COMMAND_HELP.md](SPRINT_COMMAND_HELP.md), which is injected into sprint launches across tools.
+
+## Main features
+
+- Pipeline board across `PLAN`, `BUILD`, `REVIEW`, `QA`, `SHIP`, and `COMPLETE`
+- Sprint actions that execute workflow commands in the backing terminal
+- Sprint history feed combining lifecycle events, phase transitions, and action logs
+- Sprint review report for structural validity, freshness, and workflow correctness
+- Sprint remix flow that reopens the original creation path with prefilled defaults
+- Destructive sprint deletion with tmux/session cleanup
+- Frontend pending-question modal backed by unresolved MCP ask-user requests
+- Tool picker and tool-aware tmux/session handling
+- Settings for app config, project/group config, and CLI tool registry
+- Alerts for stale and blocked sprints
+- Retro, analytics, recommendation, and briefing endpoints for the dashboard
 
 ## Architecture
 
-```
-Browser (MacBook / iPhone over Tailscale)
-    │
-    ├── HTTP: REST API + SSE fallback
-    └── WebSocket: live terminal
-    │
-Server (Node.js + Express)
-    │
-    ├── SQLite: session metadata
-    ├── node-pty: terminal bridge
-    └── tmux: session backend (durable)
+```text
+Browser
+  ├─ React + Vite Mission Control UI
+  ├─ xterm.js terminal client
+  └─ polling/SSE for dashboard, snippets, alerts, and pending questions
+
+Node/Express server
+  ├─ sprint API and workflow routes
+  ├─ tmux launch / attach / cleanup
+  ├─ session runtime abstraction for multiple CLI tools
+  ├─ MCP ask-user response handling
+  └─ SQLite persistence for sessions, tools, and local state
+
+Project repos
+  ├─ .sprints/<feature>/STATE.json
+  ├─ .sprints/<feature>/ATOMS.md
+  ├─ CLAUDE.md / AGENTS.md
+  └─ backfilled GEMINI.md / copilot-instructions.md when needed
 ```
 
-## Prerequisites
+## Requirements
 
-- **Node.js** 20+ (tested with 23)
-- **tmux** (`brew install tmux`)
-- **Claude Code** CLI installed and authenticated
-- **Tailscale** (for remote access)
+- Node.js 20+
+- `tmux`
+- one or more installed coding CLIs
+  - `claude`
+  - `gh copilot`
+  - `gemini`
+- a gstack config file
+- optional `ntfy` setup for mobile notifications
 
 ## Setup
 
 ```bash
-git clone https://github.com/Afstkla/claude-command-center.git
-cd claude-command-center
-
-# Install dependencies
+git clone <repo>
+cd sprint-command-center
 npm install
 cd frontend && npm install && cd ..
-
-# Configure
 cp .env.example .env
-# Edit .env — set AUTH_PASSPHRASE and AUTH_SECRET
 ```
 
-### Environment variables
+Important environment variables from [.env.example](.env.example):
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `PORT` | Server port | `3100` |
-| `AUTH_PASSPHRASE` | Login passphrase | (required) |
-| `AUTH_SECRET` | JWT signing key (min 32 chars) | (required) |
-| `COOKIE_MAX_AGE_HOURS` | Auth cookie expiry | `24` |
+| Variable | Purpose |
+|---|---|
+| `PORT` | HTTP server port |
+| `AUTH_PASSPHRASE` | login passphrase |
+| `AUTH_SECRET` | cookie signing secret |
+| `COOKIE_MAX_AGE_HOURS` | auth session duration |
+| `GSTACK_CONFIG` | path to your gstack `config.yaml` |
+| `NTFY_*` | optional push notification settings |
+| `BASE_URL` | absolute app URL for notifications and links |
 
 ## Running
 
@@ -94,9 +132,11 @@ cp .env.example .env
 
 ```bash
 npm run dev
-# Backend: http://localhost:3100
-# Frontend: http://localhost:5173 (proxies API to backend)
 ```
+
+This starts:
+- backend on `http://localhost:3100`
+- frontend dev server on `http://localhost:5173`
 
 ### Production
 
@@ -105,159 +145,51 @@ npm run build
 npm start
 ```
 
-### Running with pm2 (recommended)
-
-Use [pm2](https://pm2.keymetrics.io/) to keep the server running and auto-restart on boot:
+### pm2
 
 ```bash
-npm install -g pm2
-
-# Start the server
-pm2 start npm --name command-center --cwd /path/to/claude-command-center -- start
-
-# Save the process list and enable startup on boot
-pm2 save
-pm2 startup  # follow the printed instructions (requires sudo)
+npm run pm2:start
 ```
 
-> **Important:** Do not run `pm2 start` from inside a Claude Code session. Claude Code sets a `CLAUDECODE` environment variable that pm2 captures, which prevents spawned sessions from starting. If you already did this, fix it with:
-> ```bash
-> pm2 delete command-center
-> env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT pm2 start npm --name command-center --cwd /path/to/claude-command-center -- start
-> pm2 save
-> ```
+Useful helpers:
+- `npm run pm2:logs`
+- `npm run pm2:restart`
+- `npm run pm2:stop`
 
-## Network reliability
+## Typical workflow
 
-Since this is designed to run on a headless server accessed remotely, network stability matters. Here are common issues and fixes discovered while running on a Mac Mini over Tailscale.
+1. Open the dashboard and log in.
+2. Confirm your projects and groups in Settings, or use the scan flow to discover candidates.
+3. Start a sprint or run Explore Idea, selecting the CLI tool you want to use.
+4. Let the agent execute the workflow in tmux.
+5. Use board actions for review/qa/ship/archive, or open the terminal when you need direct control.
+6. If the workflow truly needs input, answer it from the frontend question modal.
 
-### Prevent sleep (critical)
+## Project guidance sync
 
-macOS defaults to sleeping after a few minutes of inactivity, even on a Mac Mini. Each sleep cycle kills all TCP connections (WebSocket, SSE, API streams). Disable it:
+If a project has `CLAUDE.md` or `AGENTS.md`, Sprint Command can backfill:
+- `GEMINI.md`
+- `copilot-instructions.md`
+- `.github/copilot-instructions.md`
 
-```bash
-sudo pmset -a sleep 0 disksleep 0 powernap 0
-```
+That keeps tool initialization consistent across CLIs instead of depending on Claude-only repo conventions.
 
-Alternatively, keep `caffeinate` running via pm2:
+## Notifications
 
-```bash
-pm2 start caffeinate --name no-sleep -- -s
-pm2 save
-```
+Optional `ntfy` support can push alerts when the agent needs your attention.
 
-### Disable Wi-Fi if using Ethernet
-
-If both Ethernet and Wi-Fi are active on the same subnet, macOS may route traffic through either interface unpredictably. This causes long-lived connections (WebSockets, SSE) to break when routes flip. Disable Wi-Fi if you have a wired connection:
-
-```bash
-networksetup -setairportpower en1 off
-```
-
-### Connection resilience
-
-The terminal uses several mechanisms to handle unstable connections:
-
-- **Server-side ping/pong** — the WebSocket server pings clients every 15s and terminates unresponsive connections, preventing zombie sockets
-- **SSE keepalive** — periodic comments prevent proxies and VPN tunnels from dropping idle SSE connections
-- **Automatic reconnect** — the frontend reconnects indefinitely with exponential backoff (up to 30s), instead of giving up after a few attempts
-- **Client-side heartbeat** — if no data arrives within 25s, the client proactively reconnects rather than waiting for a TCP timeout
-- **Dashboard offline banner** — shows a "Connection lost" indicator when the API is unreachable, clears automatically on recovery
-- **Visibility-aware refresh** — the dashboard refetches immediately when the browser tab regains focus or the device comes back online
-
-### Network monitoring
-
-A monitoring script is included for debugging connectivity issues:
+Setup:
 
 ```bash
-pm2 start scripts/network-monitor.sh --name network-monitor --interpreter bash
-```
-
-Logs to `logs/network-monitor.log` every 30s with: interface status, default route, ping times, DNS resolution, TCP/HTTPS latency to the Anthropic API, and Tailscale state. Entries are flagged as `PROBLEM` with extra detail when checks fail.
-
-## Tailscale setup
-
-1. Install [Tailscale](https://tailscale.com/download) on your server and client devices
-2. Run `tailscale up` on both
-3. Find your server's Tailscale IP: `tailscale ip -4`
-4. Access the command center at `http://<tailscale-ip>:3100`
-
-No HTTPS needed — Tailscale encrypts all traffic via WireGuard. No port forwarding, no public exposure.
-
-### Why Tailscale?
-
-- Zero-config VPN: devices authenticate via your identity provider
-- WireGuard encryption: all traffic is end-to-end encrypted
-- No open ports: your server is never exposed to the public internet
-- Works everywhere: train wifi, coffee shop, mobile data
-
-## Usage
-
-1. Open `http://<tailscale-ip>:3100` and enter your passphrase
-2. Click **New Session** and choose a template:
-   - **Directory** — pick a folder and start Claude in it
-   - **Git Clone** — clone a repo (creates `repo/repo-main/` structure for worktree support)
-   - **Worktree** — create a feature branch worktree from an existing repo, with an optional task prompt
-3. Click a session card to open the terminal
-4. Use quick action buttons on session cards to approve, reject, or send input without opening the terminal
-
-### Git worktree workflow
-
-The worktree workflow lets you run multiple Claude sessions on the same repo without conflicts:
-
-1. **Clone a repo** using the Git Clone template — this creates a `repo/repo-main/` directory structure
-2. **Create worktrees** using the Worktree template — each gets its own branch (`feat/<name>`) and directory
-3. **Assign tasks** via the Task Description field — Claude receives it as its first prompt after startup
-4. **Clean up** — killing a worktree session automatically removes the git worktree
-
-Sessions from the same repo are grouped together on the dashboard.
-
-### Session durability
-
-Sessions run inside tmux. If the server crashes or restarts:
-- Sessions keep running in tmux
-- The server reconnects to them on startup
-- You can always SSH in and run `tmux ls` / `tmux attach -t cc-<id>`
-
-## Push notifications
-
-Get notified on your phone when Claude needs tool approval or wants your input. Uses [ntfy](https://ntfy.sh) for push delivery.
-
-### Setup
-
-Add ntfy config to your `.env`:
-
-```bash
-NTFY_ENABLED=true
-NTFY_URL=https://ntfy.sh        # or your self-hosted instance
-NTFY_TOPIC=your-secret-topic
-NTFY_AUTH_TOKEN=your-token       # optional, for private topics
-BASE_URL=http://<tailscale-ip>:3100
-```
-
-Then run the setup scripts:
-
-```bash
-# MCP server — gives Claude notify_user/ask_user tools
 ./scripts/setup-mcp.sh
-
-# Notification hook — alerts you on tool approval prompts
 ./scripts/setup-hooks.sh
 ```
 
-Both scripts configure Claude Code at the **user level** (`~/.claude.json` and `~/.claude/settings.json`), so notifications work across all sessions and projects. Restart any running Claude Code sessions to pick up the changes.
+With the newer frontend question loop, attention requests can show up both as notifications and directly in Mission Control.
 
-## Tech stack
+## Related docs
 
-| Component | Technology |
-|-----------|-----------|
-| Backend | Node.js, Express, TypeScript |
-| Frontend | React 19, Vite, TypeScript |
-| Terminal | xterm.js, node-pty |
-| Session backend | tmux |
-| Database | SQLite (better-sqlite3) |
-| Auth | JWT via jose |
-
-## License
-
-MIT
+- [docs/cli-tool-registry.md](docs/cli-tool-registry.md)
+- [SPRINT_COMMAND_HELP.md](SPRINT_COMMAND_HELP.md)
+- [CHANGELOG.md](CHANGELOG.md)
+- [FOR_YOCHAI.md](FOR_YOCHAI.md)

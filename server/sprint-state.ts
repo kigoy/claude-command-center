@@ -6,10 +6,23 @@ export interface SprintState {
   branch: string;
   created: string;
   phase: string;
+  tool_id?: string;
+  origin?: SprintOrigin;
   phase_history: unknown[];
+  activity_history?: unknown[];
   qa_routing: Record<string, unknown>;
   blocked: boolean;
   blocked_reason: string | null;
+}
+
+export interface SprintOrigin {
+  type: 'new-sprint' | 'explore-idea';
+  feature_name?: string;
+  project_id?: string;
+  mode?: 'existing' | 'new';
+  idea_name?: string;
+  description?: string;
+  group_id?: string;
 }
 
 export interface ChainStatus {

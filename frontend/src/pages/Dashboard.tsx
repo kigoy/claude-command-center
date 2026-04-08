@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { SessionCard } from '../components/SessionCard';
 import { NewSessionDialog } from '../components/NewSessionDialog';
+import { useCliTools } from '../hooks/use-cli-tools';
 
 interface Session {
   id: string;
@@ -14,6 +15,8 @@ interface Session {
   repo: string | null;
   pane_title: string | null;
   rocket_mode: number;
+  toolId: string;
+  toolLabel: string;
 }
 
 export function Dashboard() {
@@ -22,6 +25,7 @@ export function Dashboard() {
   const [showNew, setShowNew] = useState(false);
   const [offline, setOffline] = useState(false);
   const failCount = useRef(0);
+  const { selectedToolId, selectedTool } = useCliTools();
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -140,6 +144,8 @@ export function Dashboard() {
 
       {showNew && (
         <NewSessionDialog
+          selectedToolId={selectedToolId}
+          selectedToolLabel={selectedTool?.label}
           onClose={() => setShowNew(false)}
           onCreated={() => {
             setShowNew(false);

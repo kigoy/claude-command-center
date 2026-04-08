@@ -1,6 +1,6 @@
 {
   "name": "sprint-command-center",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "type": "module",
   "scripts": {
     "dev": "bash scripts/dev.sh",

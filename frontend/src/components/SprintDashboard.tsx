@@ -4,6 +4,7 @@ import { GroupSection } from './GroupSection';
 import { NewSprintDialog } from './NewSprintDialog';
 import { AnalyticsTab } from './AnalyticsTab';
 import { useSprintSSE } from '../hooks/use-sprint-sse';
+import { useCliTools } from '../hooks/use-cli-tools';
 import type { DashboardData } from '../types';
 
 export function SprintDashboard() {
@@ -14,6 +15,7 @@ export function SprintDashboard() {
   const [newSprintProject, setNewSprintProject] = useState<string | null>(null);
   const [tab, setTab] = useState<'sprints' | 'analytics'>('sprints');
   const [newSkills, setNewSkills] = useState<Array<{ skill: string }>>([]);
+  const { selectedToolId } = useCliTools();
 
   useEffect(() => {
     fetch('/api/skills/new').then((r) => r.json()).then(setNewSkills).catch(() => {});
@@ -173,6 +175,7 @@ export function SprintDashboard() {
         <NewSprintDialog
           projects={data.projects.map((p) => ({ id: p.id, path: p.path, stack: p.stack }))}
           defaultProjectId={newSprintProject}
+          toolId={selectedToolId}
           onClose={() => setNewSprintProject(null)}
           onCreated={() => { setNewSprintProject(null); fetchDashboard(); }}
         />

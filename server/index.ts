@@ -21,6 +21,19 @@ import { setupSprintSSE } from './sprint-sse.js';
 import { setupTerminalSnippets } from './terminal-snippets.js';
 import { startTmuxDetection, getSprintSessions } from './tmux-detect.js';
 import { startSprintNotifications } from './sprint-notifications.js';
+import { getProjects } from './sprint-config.js';
+import {
+  seedBuiltInCliTools,
+  listCliTools,
+  getCliTool,
+  createCliTool,
+  updateCliTool,
+  setCliToolEnabled,
+  reorderCliTools,
+  duplicateCliTool,
+} from './cli-tools.js';
+import { getToolDisplayLabel } from './session-runtime.js';
+import { ensureProjectInstructionFiles } from './project-instructions.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT || '3100', 10);
@@ -28,6 +41,30 @@ const PORT = parseInt(process.env.PORT || '3100', 10);
 const app = express();
 app.use(express.json());
 app.use(cookieParser());
+
+for (const project of getProjects()) {
+  try {
+    ensureProjectInstructionFiles(project.path);
+  } catch (err) {
+    console.warn(`[instructions] Failed to sync instructions for ${project.id}: ${err}`);
+  }
+}
+
+function serializeSession(session: ReturnType<typeof getSessionFromDb>) {
+  if (!session) return null;
+  const tool = getCliTool(session.tool_id);
+  return {
+    ...session,
+    toolId: session.tool_id,
+    toolLabel: getToolDisplayLabel(session.tool_id, tool),
+    tool: tool ? {
+      id: tool.id,
+      label: tool.label,
+      enabled: tool.enabled,
+      builtIn: tool.builtIn,
+    } : null,
+  };
+}
 
 // Token auth for ntfy action buttons (before cookie auth middleware)
 app.post('/api/sessions/:id/input', (req, res, next) => {
@@ -242,6 +279,73 @@ app.post('/api/mcp/respond', (req, res) => {
   res.json({ ok: true });
 });
 
+// --- CLI Tools ---
+
+app.get('/api/cli-tools', (req, res) => {
+  const enabledOnly = req.query.enabledOnly === '1';
+  res.json(listCliTools({ enabledOnly }));
+});
+
+app.get('/api/cli-tools/:id', (req, res) => {
+  const tool = getCliTool(req.params.id);
+  if (!tool) {
+    res.status(404).json({ error: 'CLI tool not found' });
+    return;
+  }
+  res.json(tool);
+});
+
+app.post('/api/cli-tools', (req, res) => {
+  try {
+    const tool = createCliTool(req.body);
+    res.status(201).json(tool);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch('/api/cli-tools/reorder', (req, res) => {
+  const orderedIds = Array.isArray(req.body?.orderedIds) ? req.body.orderedIds : null;
+  if (!orderedIds) {
+    res.status(400).json({ error: 'orderedIds is required' });
+    return;
+  }
+  try {
+    res.json(reorderCliTools(orderedIds));
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/cli-tools/:id/duplicate', (req, res) => {
+  try {
+    res.status(201).json(duplicateCliTool(req.params.id));
+  } catch (err: any) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
+app.patch('/api/cli-tools/:id/enabled', (req, res) => {
+  if (typeof req.body?.enabled !== 'boolean') {
+    res.status(400).json({ error: 'enabled must be a boolean' });
+    return;
+  }
+  try {
+    res.json(setCliToolEnabled(req.params.id, req.body.enabled));
+  } catch (err: any) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
+app.patch('/api/cli-tools/:id', (req, res) => {
+  try {
+    res.json(updateCliTool(req.params.id, req.body));
+  } catch (err: any) {
+    const status = /not found/i.test(err.message) ? 404 : 400;
+    res.status(status).json({ error: err.message });
+  }
+});
+
 // --- Sprint Command API ---
 
 app.use('/api', sprintApi);
@@ -263,7 +367,7 @@ app.get('/api/tmux-sessions', (_req, res) => {
 // --- Sessions ---
 
 app.get('/api/sessions', (_req, res) => {
-  res.json(listSessions());
+  res.json(listSessions().map((session) => serializeSession(session)));
 });
 
 app.get('/api/sessions/:id', (req, res) => {
@@ -272,11 +376,21 @@ app.get('/api/sessions/:id', (req, res) => {
     res.status(404).json({ error: 'Session not found' });
     return;
   }
-  res.json(session);
+  res.json(serializeSession(session));
 });
 
 app.post('/api/sessions', (req, res) => {
-  const { name, cwd, command, worktreePath, initialPrompt, repo, rocketMode, tmuxSession } = req.body;
+  const {
+    name,
+    cwd,
+    toolId,
+    worktreePath,
+    initialPrompt,
+    repo,
+    rocketMode,
+    tmuxSession,
+    bootstrapCommand,
+  } = req.body;
 
   if (!name || !cwd) {
     res.status(400).json({ error: 'name and cwd are required' });
@@ -284,11 +398,26 @@ app.post('/api/sessions', (req, res) => {
   }
 
   try {
-    const session = createSession(name, cwd, command, { worktreePath, initialPrompt, repo, tmuxSession });
+    const session = createSession(name, cwd, {
+      toolId,
+      worktreePath,
+      initialPrompt,
+      repo,
+      tmuxSession,
+      bootstrapCommand,
+    });
     if (rocketMode) setRocketMode(session.id, true);
-    res.status(201).json({ ...session, rocket_mode: rocketMode ? 1 : 0 });
+    const payload = serializeSession(getSessionFromDb(session.id));
+    if (!payload) {
+      throw new Error('Failed to load created session');
+    }
+    res.status(201).json({
+      ...payload,
+      rocket_mode: rocketMode ? 1 : session.rocket_mode,
+    });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    const status = /CLI tool/i.test(err.message) ? 400 : 500;
+    res.status(status).json({ error: err.message });
   }
 });
 
@@ -436,6 +565,7 @@ const server = createServer(app);
 setupTerminalWs(server);
 
 // Sync existing tmux sessions on startup
+seedBuiltInCliTools();
 syncSessionsWithTmux();
 startStatusPolling();
 startTmuxDetection();

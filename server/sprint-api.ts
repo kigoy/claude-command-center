@@ -4,7 +4,16 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
-import { getProjects, getGroups, addProject, updateProjectPath } from './sprint-config.js';
+import {
+  getProjects,
+  getGroups,
+  addProject,
+  updateProjectPath,
+  updateProjectConfig,
+  createGroup,
+  updateGroup,
+  scanProjectCandidates,
+} from './sprint-config.js';
 import { readSprintState, writeSprintState, deriveChainStatus, type SprintState, type ChainStatus } from './sprint-state.js';
 import { resolveAtomCounts } from './sprint-atoms.js';
 import { rankRecommendations, type SprintContext } from './sprint-recommendations.js';
@@ -12,6 +21,14 @@ import { buildRetroSummary, markRetroRun } from './sprint-retro.js';
 import { buildAnalytics } from './sprint-analytics.js';
 import { suggestSkills } from './sprint-suggestions.js';
 import { getSprintSessions } from './tmux-detect.js';
+import { getCliTool } from './cli-tools.js';
+import { launchToolInTmux, shouldSendPromptOverStdin } from './session-runtime.js';
+import { buildExploreIdeaPrompt, buildSprintBootstrapPrompt, buildSprintCommandPrompt } from './sprint-command-help.js';
+import { deleteSprintArtifacts } from './sprint-cleanup.js';
+import { buildSprintRemixPayload } from './sprint-remix.js';
+import { reviewSprintState } from './sprint-review.js';
+import { ensureProjectInstructionFiles } from './project-instructions.js';
+import { appendSprintActivity, buildSprintHistory } from './sprint-history.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const router = Router();
@@ -43,6 +60,7 @@ interface SprintSummary {
   chain_status: ChainStatus;
   suggestions: string[];
   created: string;
+  tool_id: string;
   phase_history: Array<{ phase?: string; entered?: string; exited?: string }>;
 }
 
@@ -78,6 +96,56 @@ function findTmuxSession(projectId: string, feature: string): string | null {
   return null;
 }
 
+function getSprintToolId(state: SprintState): string {
+  return state.tool_id || 'claude';
+}
+
+function resolveSprintTool(toolId?: string) {
+  const effectiveToolId = toolId || 'claude';
+  const tool = getCliTool(effectiveToolId);
+  if (!tool) {
+    throw new Error(`CLI tool '${effectiveToolId}' is missing`);
+  }
+  if (!tool.enabled) {
+    throw new Error(`CLI tool '${effectiveToolId}' is disabled`);
+  }
+  return tool;
+}
+
+function sendPromptToSprintSession(sessionName: string, prompt: string) {
+  const tmpFile = join(tmpdir(), `explore-${Date.now()}.txt`);
+  writeFileSync(tmpFile, prompt);
+  execFileSync('tmux', ['load-buffer', tmpFile]);
+  execFileSync('tmux', ['paste-buffer', '-t', sessionName]);
+  execFileSync('tmux', ['send-keys', '-t', sessionName, 'Enter']);
+  unlinkSync(tmpFile);
+}
+
+function launchSprintTool(opts: {
+  sessionName: string;
+  cwd: string;
+  toolId?: string;
+  prompt?: string;
+}) {
+  const tool = resolveSprintTool(opts.toolId);
+  launchToolInTmux({
+    tmuxName: opts.sessionName,
+    cwd: opts.cwd,
+    tool,
+    prompt: opts.prompt,
+  });
+
+  if (opts.prompt && shouldSendPromptOverStdin(tool, opts.prompt)) {
+    setTimeout(() => {
+      try {
+        sendPromptToSprintSession(opts.sessionName, opts.prompt!);
+      } catch {
+        // Non-fatal.
+      }
+    }, 5000);
+  }
+}
+
 /** List all sprints for a project by reading its .sprints/ directory. */
 function listSprintsForProject(
   projectId: string,
@@ -101,7 +169,9 @@ function listSprintsForProject(
           branch: 'main',
           created: now,
           phase: 'PLAN',
+          tool_id: 'claude',
           phase_history: [],
+          activity_history: [],
           qa_routing: {},
           blocked: false,
           blocked_reason: null,
@@ -138,6 +208,7 @@ function listSprintsForProject(
           has_ui: hasUi,
         }),
         created: state.created,
+        tool_id: getSprintToolId(state),
         phase_history: (state.phase_history as Array<{ phase?: string; entered?: string; exited?: string }>).map(
           (e) => ({ phase: e.phase, entered: e.entered, exited: e.exited }),
         ),
@@ -170,6 +241,16 @@ router.get('/projects', (_req, res) => {
   res.json(buildProjectSummaries());
 });
 
+/** GET /api/config — editable project/group config with group membership expansion */
+router.get('/config', (_req, res) => {
+  const groups = getGroups();
+  const projects = getProjects().map((project) => ({
+    ...project,
+    groupIds: groups.filter((group) => group.projects.includes(project.id)).map((group) => group.id),
+  }));
+  res.json({ projects, groups });
+});
+
 /** PATCH /api/projects/:id/path — update project directory path */
 router.patch('/projects/:id/path', (req, res) => {
   const { path } = req.body;
@@ -193,12 +274,114 @@ router.patch('/projects/:id/path', (req, res) => {
     // Create .sprints/ if missing
     const sprintsDir = join(resolved, '.sprints');
     if (!existsSync(sprintsDir)) mkdirSync(sprintsDir, { recursive: true });
+    ensureProjectInstructionFiles(resolved);
 
     updateProjectPath(req.params.id, resolved);
     res.json({ ok: true, path: resolved });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+/** PATCH /api/config/projects/:id — update editable project config */
+router.patch('/config/projects/:id', (req, res) => {
+  const { path, stack, has_deploy, deploy_url, default_qa_routing, groupIds } = req.body ?? {};
+  if (path !== undefined) {
+    if (typeof path !== 'string' || !path.trim()) {
+      res.status(400).json({ error: 'path must be a non-empty string' });
+      return;
+    }
+    const resolved = join(path);
+    if ((!resolved.startsWith(ALLOWED_BASE + '/') && resolved !== ALLOWED_BASE) || !existsSync(resolved)) {
+      res.status(400).json({ error: 'path must be an existing directory inside /Volumes/Extreme Pro/' });
+      return;
+    }
+  }
+
+  if (stack !== undefined && (!stack || !ALLOWED_STACKS.has(stack))) {
+    res.status(400).json({ error: `Invalid stack. Allowed: ${[...ALLOWED_STACKS].join(', ')}` });
+    return;
+  }
+
+  if (groupIds !== undefined && !Array.isArray(groupIds)) {
+    res.status(400).json({ error: 'groupIds must be an array' });
+    return;
+  }
+
+  try {
+    updateProjectConfig(req.params.id, {
+      path: typeof path === 'string' ? join(path) : undefined,
+      stack,
+      has_deploy: typeof has_deploy === 'boolean' ? has_deploy : undefined,
+      deploy_url: typeof deploy_url === 'string' ? deploy_url.trim() : undefined,
+      default_qa_routing: typeof default_qa_routing === 'string' ? default_qa_routing : undefined,
+      groupIds: Array.isArray(groupIds) ? groupIds.filter((value) => typeof value === 'string') : undefined,
+    });
+    res.json({ ok: true });
+  } catch (err: any) {
+    const status = /not found/i.test(err.message) ? 404 : 400;
+    res.status(status).json({ error: err.message });
+  }
+});
+
+/** POST /api/config/groups — create a new group */
+router.post('/config/groups', (req, res) => {
+  const id = typeof req.body?.id === 'string' ? req.body.id.trim() : '';
+  const label = typeof req.body?.label === 'string' ? req.body.label.trim() : '';
+  if (!id || !label) {
+    res.status(400).json({ error: 'id and label are required' });
+    return;
+  }
+  if (!/^[a-z0-9][a-z0-9-_]*$/i.test(id)) {
+    res.status(400).json({ error: 'Group id must be alphanumeric with dashes or underscores' });
+    return;
+  }
+
+  try {
+    createGroup(id, label);
+    res.status(201).json({ ok: true });
+  } catch (err: any) {
+    const status = /already exists/i.test(err.message) ? 409 : 400;
+    res.status(status).json({ error: err.message });
+  }
+});
+
+/** PATCH /api/config/groups/:id — update group label and memberships */
+router.patch('/config/groups/:id', (req, res) => {
+  const { label, projects } = req.body ?? {};
+  if (label !== undefined && typeof label !== 'string') {
+    res.status(400).json({ error: 'label must be a string' });
+    return;
+  }
+  if (projects !== undefined && !Array.isArray(projects)) {
+    res.status(400).json({ error: 'projects must be an array' });
+    return;
+  }
+
+  try {
+    updateGroup(req.params.id, {
+      label: typeof label === 'string' ? label.trim() : undefined,
+      projects: Array.isArray(projects) ? projects.filter((value) => typeof value === 'string') : undefined,
+    });
+    res.json({ ok: true });
+  } catch (err: any) {
+    const status = /not found/i.test(err.message) ? 404 : 400;
+    res.status(status).json({ error: err.message });
+  }
+});
+
+/** GET /api/config/scan — scan base path for project candidates */
+router.get('/config/scan', (req, res) => {
+  const basePath = typeof req.query.basePath === 'string' && req.query.basePath.trim()
+    ? req.query.basePath.trim()
+    : ALLOWED_BASE;
+
+  if (!basePath.startsWith(ALLOWED_BASE)) {
+    res.status(400).json({ error: 'basePath must be inside /Volumes/Extreme Pro' });
+    return;
+  }
+
+  res.json({ basePath, candidates: scanProjectCandidates(basePath) });
 });
 
 /** GET /api/projects/:id/sprints — sprints for a single project */
@@ -231,6 +414,25 @@ router.get('/sprints/:projectId/:featureId/state', (req, res) => {
   res.json(state);
 });
 
+/** GET /api/sprints/:projectId/:featureId/history — combined activity/status history */
+router.get('/sprints/:projectId/:featureId/history', (req, res) => {
+  const project = getProjects().find((p) => p.id === req.params.projectId);
+  if (!project) {
+    res.status(404).json({ error: `Project '${req.params.projectId}' not found` });
+    return;
+  }
+
+  const featureId = sanitizeSegment(req.params.featureId);
+  const sprintDir = join(project.path, '.sprints', featureId);
+  const state = readSprintState(sprintDir);
+  if (!state) {
+    res.status(404).json({ error: `Sprint '${req.params.featureId}' not found` });
+    return;
+  }
+
+  res.json(buildSprintHistory(state));
+});
+
 /** GET /api/sprints/:projectId/:featureId/atoms — raw ATOMS.md content */
 router.get('/sprints/:projectId/:featureId/atoms', (req, res) => {
   const projects = getProjects();
@@ -250,9 +452,36 @@ router.get('/sprints/:projectId/:featureId/atoms', (req, res) => {
   }
 });
 
+/** GET /api/sprints/:projectId/:featureId/review — sprint validity/state review */
+router.get('/sprints/:projectId/:featureId/review', (req, res) => {
+  const project = getProjects().find((p) => p.id === req.params.projectId);
+  if (!project) {
+    res.status(404).json({ error: `Project '${req.params.projectId}' not found` });
+    return;
+  }
+
+  const featureId = sanitizeSegment(req.params.featureId);
+  const sprintDir = join(project.path, '.sprints', featureId);
+  const state = readSprintState(sprintDir);
+  if (!state) {
+    res.status(404).json({ error: `Sprint '${req.params.featureId}' not found` });
+    return;
+  }
+
+  const atoms = resolveAtomCounts(sprintDir, state);
+  const tmuxMatch = findTmuxSession(project.id, state.feature);
+
+  res.json(reviewSprintState({
+    state,
+    tmuxActive: tmuxMatch !== null,
+    hasAtoms: atoms.has_atoms,
+    atomsTotal: atoms.total,
+  }));
+});
+
 /** POST /api/sprints — create a new sprint directory + STATE.json, open tmux session */
 router.post('/sprints', (req, res) => {
-  const { projectId, featureName } = req.body;
+  const { projectId, featureName, toolId } = req.body;
   if (!projectId || !featureName) {
     res.status(400).json({ error: 'projectId and featureName are required' });
     return;
@@ -284,13 +513,27 @@ router.post('/sprints', (req, res) => {
     branch: 'main',
     created: now,
     phase: 'PLAN',
+    tool_id: toolId || 'claude',
+    origin: {
+      type: 'new-sprint',
+      project_id: projectId,
+      feature_name: safeName,
+    },
     phase_history: [{ phase: 'PLAN', entered: now }],
+    activity_history: [{
+      ts: now,
+      kind: 'system',
+      title: 'Sprint created',
+      detail: 'Started from New Sprint.',
+      phase: 'PLAN',
+    }],
     qa_routing: {},
     blocked: false,
     blocked_reason: null,
   };
 
   try {
+    ensureProjectInstructionFiles(project.path);
     mkdirSync(sprintDir, { recursive: true });
     writeFileSync(join(sprintDir, 'STATE.json'), JSON.stringify(state, null, 2) + '\n');
   } catch (err: any) {
@@ -301,11 +544,20 @@ router.post('/sprints', (req, res) => {
   // Open a new tmux session in the project directory
   const sessionName = `${projectId}-${safeName}`;
   try {
-    execFileSync('tmux', ['new-session', '-d', '-s', sessionName, '-c', project.path], {
-      stdio: 'ignore',
+    launchSprintTool({
+      sessionName,
+      cwd: project.path,
+      toolId: state.tool_id,
+      prompt: buildSprintBootstrapPrompt({
+        projectId,
+        projectPath: project.path,
+        sprintDir,
+        state,
+      }),
     });
-  } catch {
-    // tmux may not be available or session name may conflict — non-fatal
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+    return;
   }
 
   res.status(201).json({ feature: dirName, project: projectId, session: sessionName });
@@ -365,7 +617,9 @@ router.get('/sprints/:projectId/:featureId/detail', (req, res) => {
     has_atoms: atoms.has_atoms,
     tmux_session: tmuxMatch ?? `${project.id}-${state.feature.replace(/^feat-/, '')}`,
     tmux_active: tmuxMatch !== null,
+    tool_id: getSprintToolId(state),
     chain_status: deriveChainStatus(state),
+    activity_history: Array.isArray(state.activity_history) ? state.activity_history : [],
   });
 });
 
@@ -394,6 +648,13 @@ router.post('/sprints/:projectId/:featureId/exec', (req, res) => {
   }
 
   const featureId = sanitizeSegment(req.params.featureId);
+  const sprintDir = join(project.path, '.sprints', featureId);
+  const state = readSprintState(sprintDir);
+  if (!state) {
+    res.status(404).json({ error: `Sprint '${featureId}' not found` });
+    return;
+  }
+
   const { command } = req.body;
   if (!command || typeof command !== 'string') {
     res.status(400).json({ error: 'command is required' });
@@ -406,32 +667,57 @@ router.post('/sprints/:projectId/:featureId/exec', (req, res) => {
   }
 
   const sessionName = `${req.params.projectId}-${featureId.replace(/^feat-/, '')}`;
+  const prompt = buildSprintCommandPrompt({
+    command,
+    projectId: req.params.projectId,
+    projectPath: project.path,
+    sprintDir,
+    state,
+    toolId: getSprintToolId(state),
+  });
 
-  // Check if tmux session exists, create if not
+  let sessionExists = true;
   try {
     execFileSync('tmux', ['has-session', '-t', sessionName], { stdio: 'ignore' });
   } catch {
-    // Session doesn't exist — create it
+    sessionExists = false;
+  }
+
+  if (!sessionExists) {
     try {
-      execFileSync('tmux', ['new-session', '-d', '-s', sessionName, '-c', project.path], {
-        stdio: 'ignore',
+      launchSprintTool({
+        sessionName,
+        cwd: project.path,
+        toolId: getSprintToolId(state),
+        prompt,
       });
     } catch (err: any) {
       res.status(500).json({ error: `Failed to create tmux session: ${err.message}` });
       return;
     }
+  } else {
+    try {
+      sendPromptToSprintSession(sessionName, prompt);
+    } catch (err: any) {
+      res.status(500).json({ error: `Failed to send command: ${err.message}` });
+      return;
+    }
   }
 
-  // Send command via send-keys
   try {
-    execFileSync('tmux', ['send-keys', '-t', sessionName, '-l', command.trim()]);
-    execFileSync('tmux', ['send-keys', '-t', sessionName, 'Enter']);
-  } catch (err: any) {
-    res.status(500).json({ error: `Failed to send command: ${err.message}` });
-    return;
+    const updatedState = appendSprintActivity(state, {
+      ts: new Date().toISOString(),
+      kind: 'action',
+      title: `Sent ${command.trim()}`,
+      detail: 'Queued to the sprint terminal session.',
+      phase: state.phase,
+    });
+    writeSprintState(sprintDir, updatedState);
+  } catch {
+    // Non-fatal; command was already sent.
   }
 
-  res.json({ session: sessionName, command: command.trim(), sent: true });
+  res.json({ session: sessionName, command: command.trim(), sent: true, prompt });
 });
 
 // --- Valid phase transitions ---
@@ -497,15 +783,22 @@ router.post('/sprints/:projectId/:featureId/transition', (req, res) => {
   updatedHistory.push({ phase: to_phase, entered: now });
 
   const updatedState: SprintState = { ...state, phase: to_phase, phase_history: updatedHistory };
+  const finalState = appendSprintActivity(updatedState, {
+    ts: now,
+    kind: 'status',
+    title: `Transitioned ${state.phase} -> ${to_phase}`,
+    detail: summary && typeof summary === 'string' ? summary.slice(0, 1000) : undefined,
+    phase: to_phase,
+  });
 
   try {
-    writeSprintState(sprintDir, updatedState);
+    writeSprintState(sprintDir, finalState);
   } catch (err: any) {
     res.status(500).json({ error: `Failed to write STATE.json: ${err.message}` });
     return;
   }
 
-  res.json({ phase: to_phase, chain_status: deriveChainStatus(updatedState) });
+  res.json({ phase: to_phase, chain_status: deriveChainStatus(finalState) });
 });
 
 /** GET /api/retro — cross-project retrospective aggregation */
@@ -638,6 +931,7 @@ router.post('/projects', (req, res) => {
       has_deploy: !!has_deploy,
       deploy_url: has_deploy ? deploy_url : undefined,
     }, group || undefined);
+    ensureProjectInstructionFiles(resolved);
 
     res.status(201).json({ projectId });
   } catch (err: any) {
@@ -647,7 +941,7 @@ router.post('/projects', (req, res) => {
 
 /** POST /api/explore-idea — explore in existing project or create new project */
 router.post('/explore-idea', (req, res) => {
-  const { name, description, group, projectId } = req.body;
+  const { name, description, group, projectId, toolId } = req.body;
   if (!name) {
     res.status(400).json({ error: 'name is required' });
     return;
@@ -675,14 +969,30 @@ router.post('/explore-idea', (req, res) => {
     }
 
     try {
+      ensureProjectInstructionFiles(project.path);
       mkdirSync(sprintDir, { recursive: true });
       const now = new Date().toISOString();
-      const state = {
+      const state: SprintState = {
         feature: dirName,
         branch: 'main',
         created: now,
         phase: 'PLAN',
+        tool_id: toolId || 'claude',
+        origin: {
+          type: 'explore-idea',
+          mode: 'existing',
+          project_id: projectId,
+          idea_name: slug,
+          description: typeof description === 'string' ? description.slice(0, 1000) : '',
+        },
         phase_history: [{ phase: 'PLAN', entered: now }],
+        activity_history: [{
+          ts: now,
+          kind: 'system',
+          title: 'Explore Idea sprint created',
+          detail: 'Started from Explore Idea in an existing project.',
+          phase: 'PLAN',
+        }],
         qa_routing: {},
         blocked: false,
         blocked_reason: null,
@@ -692,24 +1002,19 @@ router.post('/explore-idea', (req, res) => {
       // Open tmux session
       const sessionName = `${projectId}-${slug}`;
       try {
-        execFileSync('tmux', ['new-session', '-d', '-s', sessionName, '-c', project.path], { stdio: 'ignore' });
-        if (description) {
-          execFileSync('tmux', ['send-keys', '-t', sessionName, '-l', 'claude']);
-          execFileSync('tmux', ['send-keys', '-t', sessionName, 'Enter']);
-          // Use load-buffer + paste-buffer to preserve newlines in multi-line descriptions
-          setTimeout(() => {
-            try {
-              const prompt = `Read /Volumes/Extreme Pro/.gstack/skills/office-hours/SKILL.md and run office-hours on this idea:\n\n${description.slice(0, 500)}`;
-              const tmpFile = join(tmpdir(), `explore-${Date.now()}.txt`);
-              writeFileSync(tmpFile, prompt);
-              execFileSync('tmux', ['load-buffer', tmpFile]);
-              execFileSync('tmux', ['paste-buffer', '-t', sessionName]);
-              execFileSync('tmux', ['send-keys', '-t', sessionName, 'Enter']);
-              unlinkSync(tmpFile);
-            } catch { /* ignore */ }
-          }, 5000);
-        }
-      } catch { /* tmux not available */ }
+        const prompt = buildExploreIdeaPrompt({
+          projectId,
+          projectPath: project.path,
+          sprintDir,
+          state,
+          description: typeof description === 'string' ? description.slice(0, 1000) : undefined,
+          toolId: state.tool_id,
+        });
+        launchSprintTool({ sessionName, cwd: project.path, toolId: state.tool_id, prompt });
+      } catch (err: any) {
+        res.status(400).json({ error: err.message });
+        return;
+      }
 
       res.status(201).json({ projectId, session: sessionName, path: project.path, feature: dirName });
     } catch (err: any) {
@@ -739,16 +1044,33 @@ router.post('/explore-idea', (req, res) => {
       claudeMd = `# ${slug}\n\n## Workflow\n\nSprint Command is the development workflow engine.\n- Orchestrator: /Volumes/Extreme Pro/.gstack/orchestrator.md\n- Skills: /Volumes/Extreme Pro/.gstack/skills/\n\n## Post-Task\n\nCreate FOR_YOCHAI.md after significant work. Coffee-chat tone.\n`;
     }
     writeFileSync(join(projectPath, 'CLAUDE.md'), claudeMd);
+    ensureProjectInstructionFiles(projectPath);
 
     const sprintDir = join(projectPath, '.sprints', 'feat-exploration');
     mkdirSync(sprintDir, { recursive: true });
     const now = new Date().toISOString();
-    const state = {
+    const state: SprintState = {
       feature: 'feat-exploration',
       branch: 'main',
       created: now,
       phase: 'PLAN',
+      tool_id: toolId || 'claude',
+      origin: {
+        type: 'explore-idea',
+        mode: 'new',
+        project_id: slug,
+        group_id: typeof group === 'string' ? group : '',
+        idea_name: slug,
+        description: typeof description === 'string' ? description.slice(0, 1000) : '',
+      },
       phase_history: [{ phase: 'PLAN', entered: now }],
+      activity_history: [{
+        ts: now,
+        kind: 'system',
+        title: 'Explore Idea project created',
+        detail: 'Created a new project from Explore Idea.',
+        phase: 'PLAN',
+      }],
       qa_routing: {},
       blocked: false,
       blocked_reason: null,
@@ -759,23 +1081,19 @@ router.post('/explore-idea', (req, res) => {
 
     const sessionName = `${slug}-exploration`;
     try {
-      execFileSync('tmux', ['new-session', '-d', '-s', sessionName, '-c', projectPath], { stdio: 'ignore' });
-      if (description) {
-        execFileSync('tmux', ['send-keys', '-t', sessionName, '-l', 'claude']);
-        execFileSync('tmux', ['send-keys', '-t', sessionName, 'Enter']);
-        setTimeout(() => {
-          try {
-            const prompt = `Read /Volumes/Extreme Pro/.gstack/skills/office-hours/SKILL.md and run office-hours on this idea:\n\n${description.slice(0, 500)}`;
-            const tmpFile = join(tmpdir(), `explore-${Date.now()}.txt`);
-            writeFileSync(tmpFile, prompt);
-            execFileSync('tmux', ['load-buffer', tmpFile]);
-            execFileSync('tmux', ['paste-buffer', '-t', sessionName]);
-            execFileSync('tmux', ['send-keys', '-t', sessionName, 'Enter']);
-            unlinkSync(tmpFile);
-          } catch { /* ignore */ }
-        }, 5000);
-      }
-    } catch { /* tmux not available */ }
+      const prompt = buildExploreIdeaPrompt({
+        projectId: slug,
+        projectPath,
+        sprintDir,
+        state,
+        description: typeof description === 'string' ? description.slice(0, 1000) : undefined,
+        toolId: state.tool_id,
+      });
+      launchSprintTool({ sessionName, cwd: projectPath, toolId: state.tool_id, prompt });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+      return;
+    }
 
     res.status(201).json({ projectId: slug, session: sessionName, path: projectPath, feature: 'feat-exploration' });
   } catch (err: any) {
@@ -911,6 +1229,61 @@ router.post('/sprints/:projectId/:featureId/archive', (req, res) => {
 
   writeSprintState(sprintDir, { ...state, archived: true } as any);
   res.json({ ok: true, archived: true });
+});
+
+router.delete('/sprints/:projectId/:featureId', (req, res) => {
+  const project = getProjects().find((p) => p.id === req.params.projectId);
+  if (!project) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+
+  const featureId = sanitizeSegment(req.params.featureId);
+  const sprintDir = join(project.path, '.sprints', featureId);
+  const state = readSprintState(sprintDir);
+  if (!state) {
+    res.status(404).json({ error: 'Sprint not found' });
+    return;
+  }
+
+  const tmuxSession = `${req.params.projectId}-${featureId.replace(/^feat-/, '')}`;
+
+  try {
+    deleteSprintArtifacts(project.path, featureId, tmuxSession);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to delete sprint' });
+    return;
+  }
+
+  res.json({ ok: true, deleted: true, feature: featureId });
+});
+
+router.post('/sprints/:projectId/:featureId/remix', (req, res) => {
+  const project = getProjects().find((p) => p.id === req.params.projectId);
+  if (!project) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+
+  const featureId = sanitizeSegment(req.params.featureId);
+  const sprintDir = join(project.path, '.sprints', featureId);
+  const state = readSprintState(sprintDir);
+  if (!state) {
+    res.status(404).json({ error: 'Sprint not found' });
+    return;
+  }
+
+  const remix = buildSprintRemixPayload(state, req.params.projectId);
+  const tmuxSession = `${req.params.projectId}-${featureId.replace(/^feat-/, '')}`;
+
+  try {
+    deleteSprintArtifacts(project.path, featureId, tmuxSession);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to remix sprint' });
+    return;
+  }
+
+  res.json({ ok: true, remix });
 });
 
 export default router;

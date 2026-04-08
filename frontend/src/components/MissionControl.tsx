@@ -16,18 +16,27 @@ import { PendingQuestionsPanel } from './PendingQuestionsPanel';
 import { useSprintSSE } from '../hooks/use-sprint-sse';
 import { useBoard } from '../hooks/use-board';
 import { useTerminals } from '../hooks/use-terminals';
+import { useCliTools } from '../hooks/use-cli-tools';
 import { useKeyboardNav } from '../hooks/use-keyboard-nav';
 import type { DashboardData, PendingQuestion, TmuxSession } from '../types';
 
 type View = 'dashboard' | 'board' | 'analytics' | 'settings';
+type NewSprintDraft = { projectId?: string; featureName?: string };
+type ExploreIdeaDraft = {
+  mode?: 'existing' | 'new';
+  name?: string;
+  description?: string;
+  projectId?: string;
+  groupId?: string;
+};
 
 export function MissionControl() {
   const navigate = useNavigate();
   const [activeView, setActiveView] = useState<View | null>('board');
   const [data, setData] = useState<DashboardData | null>(null);
   const [tmuxSessions, setTmuxSessions] = useState<TmuxSession[]>([]);
-  const [newSprintProject, setNewSprintProject] = useState<string | null>(null);
-  const [showExploreIdea, setShowExploreIdea] = useState(false);
+  const [newSprintDraft, setNewSprintDraft] = useState<NewSprintDraft | null>(null);
+  const [exploreIdeaDraft, setExploreIdeaDraft] = useState<ExploreIdeaDraft | null>(null);
   const [showAddProject, setShowAddProject] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [selectedSprint, setSelectedSprint] = useState<string | null>(null);
@@ -37,6 +46,7 @@ export function MissionControl() {
   const [pendingQuestions, setPendingQuestions] = useState<PendingQuestion[]>([]);
   const [showPendingQuestions, setShowPendingQuestions] = useState(true);
   const failCount = useRef(0);
+  const { tools, selectedToolId, selectedTool, setSelectedToolId, refreshTools } = useCliTools();
 
   const { columns, allSprints, doneCount, showDone, setShowDone, filter, setFilter, projectIds } = useBoard(data);
 
@@ -44,7 +54,7 @@ export function MissionControl() {
 
   const {
     activeTerminalId, setActiveTerminalId, openTerminals, unreadSessions,
-    openTerminalForSession, openTerminalByTmuxName, openTerminalForSprint, handleTerminalActivity,
+    closeTerminal, openTerminalForSession, openTerminalByTmuxName, openTerminalForSprint, handleTerminalActivity,
   } = useTerminals({ data, onActivate: clearView });
 
   const totalCards = columns.reduce((n, col) => n + col.sprints.length, 0);
@@ -188,6 +198,13 @@ export function MissionControl() {
     return data;
   }
 
+  async function deleteJson(url: string) {
+    const res = await fetch(url, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Request failed');
+    return data;
+  }
+
   const handleSprintAction = useCallback(async (
     projectId: string, feature: string, command: string, toPhase: string,
   ) => {
@@ -218,11 +235,55 @@ export function MissionControl() {
     }
   }, [fetchDashboard]);
 
-  const handleSelectView = useCallback((view: View) => {
-    setActiveView(view);
-    setActiveTerminalId(null);
-  }, [setActiveTerminalId]);
+  const handleDeleteSprint = useCallback(async (projectId: string, feature: string) => {
+    try {
+      await deleteJson(`/api/sprints/${projectId}/${feature}`);
+      setActionToast({ msg: `Deleted ${projectId}/${feature.replace(/^feat-/, '')}`, ok: true });
+      fetchDashboard();
+      fetchTmux();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Delete failed';
+      setActionToast({ msg, ok: false });
+    } finally {
+      setTimeout(() => setActionToast(null), ACTION_TOAST_DURATION_MS);
+    }
+  }, [fetchDashboard, fetchTmux]);
 
+  const handleRemixSprint = useCallback(async (projectId: string, feature: string) => {
+    try {
+      const result = await postJson(`/api/sprints/${projectId}/${feature}/remix`, {});
+      const remix = result.remix as {
+        dialog: 'new-sprint' | 'explore-idea';
+        defaults: Record<string, string>;
+      };
+
+      if (remix.dialog === 'new-sprint') {
+        setExploreIdeaDraft(null);
+        setNewSprintDraft({
+          projectId: remix.defaults.projectId,
+          featureName: remix.defaults.featureName,
+        });
+      } else {
+        setNewSprintDraft(null);
+        setExploreIdeaDraft({
+          mode: remix.defaults.mode as 'existing' | 'new',
+          name: remix.defaults.name,
+          description: remix.defaults.description,
+          projectId: remix.defaults.projectId,
+          groupId: remix.defaults.groupId,
+        });
+      }
+
+      setActionToast({ msg: `Remixed ${projectId}/${feature.replace(/^feat-/, '')}`, ok: true });
+      fetchDashboard();
+      fetchTmux();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Remix failed';
+      setActionToast({ msg, ok: false });
+    } finally {
+      setTimeout(() => setActionToast(null), ACTION_TOAST_DURATION_MS);
+    }
+  }, [fetchDashboard, fetchTmux]);
 
   const handlePendingResponse = useCallback(async (requestId: string, response: string) => {
     const res = await fetch('/api/mcp/respond', {
@@ -238,6 +299,18 @@ export function MissionControl() {
     setActionToast({ msg: 'Sent workflow answer', ok: true });
     setTimeout(() => setActionToast(null), ACTION_TOAST_DURATION_MS);
   }, [fetchPendingQuestions]);
+
+  const handleSelectView = useCallback((view: View) => {
+    setActiveView(view);
+    setActiveTerminalId(null);
+  }, [setActiveTerminalId]);
+
+  const handleTerminalClosed = useCallback((sessionId: string) => {
+    closeTerminal(sessionId);
+    setActiveView('board');
+    fetchDashboard();
+    fetchTmux();
+  }, [closeTerminal, fetchDashboard, fetchTmux]);
 
   // --- Render ---
 
@@ -271,10 +344,13 @@ export function MissionControl() {
         activeTerminalId={activeTerminalId}
         openTerminals={openTerminals}
         unreadSessions={unreadSessions}
+        cliTools={tools}
+        selectedToolId={selectedToolId}
+        onSelectTool={setSelectedToolId}
         onSelectView={handleSelectView}
         onSelectSession={openTerminalForSession}
-        onNewSprint={setNewSprintProject}
-        onExploreIdea={() => setShowExploreIdea(true)}
+        onNewSprint={(projectId) => setNewSprintDraft({ projectId })}
+        onExploreIdea={() => setExploreIdeaDraft({})}
         onAddProject={() => setShowAddProject(true)}
       />
 
@@ -301,6 +377,7 @@ export function MissionControl() {
                     `${sprint.projectId}/${sprint.feature}`,
                     sprint.projectPath,
                     sprint.tmux_session || undefined,
+                    sprint.tool_id,
                   );
                 }
               }
@@ -309,6 +386,8 @@ export function MissionControl() {
             terminalSnippets={terminalSnippets}
             onAction={handleSprintAction}
             onArchive={handleArchive}
+            onDelete={handleDeleteSprint}
+            onRemix={handleRemixSprint}
           />
         )}
 
@@ -319,15 +398,17 @@ export function MissionControl() {
               <p className="empty">No active sprints. Use <strong>+ Sprint</strong> in the sidebar to start one.</p>
             )}
             {groups.map((g) => (
-              <GroupSection key={g.id} group={g} projects={data?.projects ?? []} onNewSprint={setNewSprintProject} onOpenTerminal={openTerminalForSprint} onProjectLinked={fetchDashboard} />
+              <GroupSection key={g.id} group={g} projects={data?.projects ?? []} onNewSprint={(projectId) => setNewSprintDraft({ projectId })} onOpenTerminal={openTerminalForSprint} onProjectLinked={fetchDashboard} onDeleteSprint={handleDeleteSprint} onRemixSprint={handleRemixSprint} />
             ))}
             {ungrouped.length > 0 && ungrouped.some((p) => p.sprints.length > 0) && (
               <GroupSection
                 group={{ id: '_other', label: 'OTHER', projects: ungrouped.map((p) => p.id) }}
                 projects={ungrouped}
-                onNewSprint={setNewSprintProject}
+                onNewSprint={(projectId) => setNewSprintDraft({ projectId })}
                 onOpenTerminal={openTerminalForSprint}
                 onProjectLinked={fetchDashboard}
+                onDeleteSprint={handleDeleteSprint}
+                onRemixSprint={handleRemixSprint}
               />
             )}
             {data?.recommendations && data.recommendations.length > 0 && (
@@ -347,7 +428,22 @@ export function MissionControl() {
         )}
 
         {!showingTerminal && activeView === 'analytics' && <AnalyticsTab />}
-        {!showingTerminal && activeView === 'settings' && <SettingsPage />}
+        {!showingTerminal && activeView === 'settings' && <SettingsPage onToolsChanged={refreshTools} onConfigChanged={fetchDashboard} />}
+
+        {showingTerminal && activeTerminalId !== null && (
+          <div className="mc-terminal-header">
+            <button className="mc-terminal-back" onClick={handleEscapeTerminal}>Back</button>
+            <div className="mc-terminal-meta">
+              <strong>{openTerminals.find((term) => term.id === activeTerminalId)?.name || 'Session'}</strong>
+              <span className="mc-terminal-tool">
+                {openTerminals.find((term) => term.id === activeTerminalId)?.toolLabel || selectedTool?.label || 'CLI'}
+              </span>
+              <span className="mc-terminal-tool-id">
+                {openTerminals.find((term) => term.id === activeTerminalId)?.toolId || selectedToolId}
+              </span>
+            </div>
+          </div>
+        )}
 
         {openTerminals.map((term) => (
           <TerminalPanel
@@ -355,6 +451,7 @@ export function MissionControl() {
             sessionId={term.id}
             visible={showingTerminal && activeTerminalId === term.id}
             onActivity={() => handleTerminalActivity(term.id)}
+            onSessionClosed={handleTerminalClosed}
           />
         ))}
       </main>
@@ -367,33 +464,41 @@ export function MissionControl() {
         />
       )}
 
-      {newSprintProject !== null && data && (
+      {newSprintDraft !== null && data && (
         <NewSprintDialog
           projects={data.projects.map((p) => ({ id: p.id, path: p.path, stack: p.stack }))}
-          defaultProjectId={newSprintProject}
-          onClose={() => setNewSprintProject(null)}
+          defaultProjectId={newSprintDraft.projectId}
+          initialFeatureName={newSprintDraft.featureName}
+          onClose={() => setNewSprintDraft(null)}
           onCreated={(result) => {
-            setNewSprintProject(null);
+            setNewSprintDraft(null);
             fetchDashboard();
             fetchTmux();
             if (result?.session) {
               const project = data.projects.find((p) => p.id === result.project);
-              openTerminalByTmuxName(result.session, project?.path || '/tmp');
+              openTerminalByTmuxName(result.session, project?.path || '/tmp', selectedToolId);
             }
           }}
+          toolId={selectedToolId}
         />
       )}
-      {showExploreIdea && (
+      {exploreIdeaDraft !== null && (
         <ExploreIdeaDialog
           groups={data?.groups ?? []}
           projects={data?.projects ?? []}
-          onClose={() => setShowExploreIdea(false)}
+          initialMode={exploreIdeaDraft.mode}
+          initialName={exploreIdeaDraft.name}
+          initialDescription={exploreIdeaDraft.description}
+          initialProjectId={exploreIdeaDraft.projectId}
+          initialGroupId={exploreIdeaDraft.groupId}
+          onClose={() => setExploreIdeaDraft(null)}
           onCreated={(result) => {
-            setShowExploreIdea(false);
+            setExploreIdeaDraft(null);
             fetchDashboard();
             fetchTmux();
-            if (result?.session) openTerminalByTmuxName(result.session, result.path);
+            if (result?.session) openTerminalByTmuxName(result.session, result.path, selectedToolId);
           }}
+          toolId={selectedToolId}
         />
       )}
       {showAddProject && (

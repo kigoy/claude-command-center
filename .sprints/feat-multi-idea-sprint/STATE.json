@@ -1,0 +1,23 @@
+{
+  "feature": "feat-multi-idea-sprint",
+  "branch": "main",
+  "created": "2026-04-08T09:40:58.950Z",
+  "phase": "PLAN",
+  "tool_id": "copilot",
+  "origin": {
+    "type": "explore-idea",
+    "mode": "existing",
+    "project_id": "sprint",
+    "idea_name": "multi-idea-sprint",
+    "description": "Add the ability to create multiple new sprints or explore multiple new ideas in parallel from Sprint Command.\n\nGoal:\nLet me queue or launch several idea explorations and sprint starts at once, instead of creating them one by one.\n\nRequirements:\n- Support creating multiple new sprints in one flow\n- Support creating multiple Explore Idea sessions in one flow\n- Allow mixed batches if that makes sense, for example some ideas and some direct sprints\n- Launch the resulting sessions in parallel\n- Make it clear which project, prompt, tool, and tmux session belongs to each created item\n- Keep the UX fast and low-friction for batch creation\n- Fit the current Sprint Command mental model instead of becoming a complex project manager\n\nDesign questions:\n- Whether this should be a batch dialog, CSV-like input, multiline prompt list, or queue builder\n- How to validate names and avoid collisions before launch\n- How to show progress and partial failures when some creations succeed and others fail\n- How "
+  },
+  "phase_history": [
+    {
+      "phase": "PLAN",
+      "entered": "2026-04-08T09:40:58.950Z"
+    }
+  ],
+  "qa_routing": {},
+  "blocked": false,
+  "blocked_reason": null
+}

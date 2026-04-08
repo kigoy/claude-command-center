@@ -1,0 +1,16 @@
+{
+  "feature": "feat-sentry-monitor-health",
+  "branch": "main",
+  "created": "2026-04-08T09:10:44.695Z",
+  "phase": "PLAN",
+  "tool_id": "copilot",
+  "phase_history": [
+    {
+      "phase": "PLAN",
+      "entered": "2026-04-08T09:10:44.695Z"
+    }
+  ],
+  "qa_routing": {},
+  "blocked": false,
+  "blocked_reason": null
+}

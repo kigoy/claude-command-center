@@ -21,12 +21,34 @@ db.exec(`
   )
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS cli_tools (
+    id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    command TEXT NOT NULL,
+    args_json TEXT NOT NULL DEFAULT '[]',
+    session_prefix TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    built_in INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    prompt_mode TEXT NOT NULL DEFAULT 'none',
+    prompt_arg_template TEXT,
+    status_detection_json TEXT,
+    env_json TEXT,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )
+`);
+
 // Additive migrations
 try { db.exec(`ALTER TABLE sessions ADD COLUMN worktree_path TEXT`); } catch {}
 try { db.exec(`ALTER TABLE sessions ADD COLUMN repo TEXT`); } catch {}
 try { db.exec(`ALTER TABLE sessions ADD COLUMN pane_title TEXT`); } catch {}
 try { db.exec(`ALTER TABLE sessions ADD COLUMN rocket_mode INTEGER NOT NULL DEFAULT 0`); } catch {}
 try { db.exec(`ALTER TABLE sessions ADD COLUMN tmux_name TEXT`); } catch {}
+try { db.exec(`ALTER TABLE sessions ADD COLUMN tool_id TEXT NOT NULL DEFAULT 'claude'`); } catch {}
+db.exec(`UPDATE sessions SET tool_id = 'claude' WHERE tool_id IS NULL OR trim(tool_id) = ''`);
 
 export interface Session {
   id: string;
@@ -40,11 +62,12 @@ export interface Session {
   pane_title: string | null;
   rocket_mode: number;
   tmux_name: string | null;
+  tool_id: string;
 }
 
 const stmts = {
   insert: db.prepare(
-    'INSERT INTO sessions (id, name, cwd, status) VALUES (?, ?, ?, ?)'
+    'INSERT INTO sessions (id, name, cwd, status, tool_id) VALUES (?, ?, ?, ?, ?)'
   ),
   getAll: db.prepare('SELECT * FROM sessions ORDER BY created_at DESC'),
   getById: db.prepare('SELECT * FROM sessions WHERE id = ?'),
@@ -72,8 +95,8 @@ const stmts = {
   ),
 };
 
-export function insertSession(id: string, name: string, cwd: string) {
-  stmts.insert.run(id, name, cwd, 'starting');
+export function insertSession(id: string, name: string, cwd: string, toolId: string) {
+  stmts.insert.run(id, name, cwd, 'starting', toolId);
 }
 
 export function getAllSessions(): Session[] {

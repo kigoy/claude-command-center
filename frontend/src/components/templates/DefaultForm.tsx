@@ -3,7 +3,7 @@ import { DirectoryBrowser } from '../DirectoryBrowser';
 
 export interface TemplatePayload {
   cwd: string;
-  command: string;
+  bootstrapCommand?: string;
   worktreePath?: string;
   initialPrompt?: string;
   repo?: string;
@@ -15,24 +15,12 @@ interface Props {
 
 export function DefaultForm({ onPayloadChange }: Props) {
   const [cwd, setCwd] = useState('~');
-  const [command, setCommand] = useState('claude');
 
   useEffect(() => {
-    onPayloadChange({ cwd, command: command || 'claude' });
-  }, [cwd, command, onPayloadChange]);
+    onPayloadChange({ cwd });
+  }, [cwd, onPayloadChange]);
 
   return (
-    <>
-      <DirectoryBrowser value={cwd} onChange={setCwd} />
-
-      <label>
-        Command
-        <input
-          value={command}
-          onChange={(e) => setCommand(e.target.value)}
-          placeholder="claude"
-        />
-      </label>
-    </>
+    <DirectoryBrowser value={cwd} onChange={setCwd} />
   );
 }

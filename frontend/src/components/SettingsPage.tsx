@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { CliToolsSettings } from './CliToolsSettings';
+import { SprintConfigSettings } from './SprintConfigSettings';
 
 interface Settings {
   NTFY_URL: string;
@@ -8,7 +10,7 @@ interface Settings {
   PORT: string;
 }
 
-export function SettingsPage() {
+export function SettingsPage({ onToolsChanged, onConfigChanged }: { onToolsChanged?: () => void; onConfigChanged?: () => void }) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -64,6 +66,9 @@ export function SettingsPage() {
         </label>
       </section>
 
+      <CliToolsSettings onToolsChanged={onToolsChanged} />
+      <SprintConfigSettings onConfigChanged={onConfigChanged} />
+
       <section className="settings-section">
         <h3>Notifications</h3>
         <label className="settings-row">
@@ -98,6 +103,10 @@ function SettingsInput({ label, value, onSave, disabled, placeholder }: {
 }) {
   const [draft, setDraft] = useState(value);
   const changed = draft !== value;
+
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
 
   return (
     <label className="settings-row">

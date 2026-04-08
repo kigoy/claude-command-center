@@ -7,7 +7,7 @@ export interface TmuxSprintSession {
   sessionName: string;
   projectId: string;
   feature: string;
-  claudeActive: boolean;
+  agentActive: boolean;
 }
 
 // --- State ---
@@ -23,6 +23,7 @@ function listTmuxSessions(): string[] {
     const output = execFileSync('tmux', ['list-sessions', '-F', '#{session_name}'], {
       encoding: 'utf-8',
       timeout: 3000,
+      stdio: ['ignore', 'pipe', 'ignore'],
     });
     return output.trim().split('\n').filter(Boolean);
   } catch {
@@ -30,17 +31,25 @@ function listTmuxSessions(): string[] {
   }
 }
 
-/** Check if Claude is active in a tmux session by inspecting recent pane output. */
-function isClaudeActive(sessionName: string): boolean {
+/** Check if the active CLI appears to be working rather than sitting at a shell prompt. */
+function isAgentActive(sessionName: string): boolean {
   try {
     const output = execFileSync('tmux', ['capture-pane', '-t', sessionName, '-p'], {
       encoding: 'utf-8',
       timeout: 3000,
+      stdio: ['ignore', 'pipe', 'ignore'],
     });
-    const tail = output.split('\n').slice(-5).join('\n').toLowerCase();
-    // Spinner chars, claude prompt, or "claude" text indicate activity
-    const patterns = [/claude/, /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/, /\$\s*claude/, /thinking/];
-    return patterns.some((p) => p.test(tail));
+    const tailLines = output.split('\n').slice(-8);
+    const tail = tailLines.join('\n');
+    const lastLine = tailLines[tailLines.length - 1]?.trim() || '';
+
+    if (!tail.trim()) return false;
+    if (/[$%#❯>]\s*$/.test(lastLine)) return false;
+    if (/do you want to proceed\?|allow|approve|deny|yes.*no/i.test(tail)) return true;
+    if (/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏●∙]/.test(tail)) return true;
+    if (/thinking|processing|reading|writing|loading|pending|running/i.test(tail)) return true;
+
+    return false;
   } catch {
     return false;
   }
@@ -94,7 +103,7 @@ function matchSession(
   return null;
 }
 
-/** Run one detection cycle: list tmux sessions, match to sprints, check claude. */
+/** Run one detection cycle: list tmux sessions, match to sprints, check recent activity. */
 function detectSessions(): void {
   const sessionNames = listTmuxSessions();
   const matchers = buildSessionMatchers();
@@ -108,7 +117,7 @@ function detectSessions(): void {
       sessionName: name,
       projectId: matched.projectId,
       feature: matched.feature,
-      claudeActive: isClaudeActive(name),
+      agentActive: isAgentActive(name),
     });
   }
 

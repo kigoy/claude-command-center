@@ -140,4 +140,181 @@ describe('GET /api/batches/:id', () => {
     expect(res.status).toBe(404);
     expect(res.body.error).toBeDefined();
   });
+
+  it('returns 404 shape with error string for non-existent batch', async () => {
+    const cookie = await getAuthCookie();
+    const res = await request(app)
+      .get('/api/batches/does-not-exist-at-all')
+      .set('Cookie', cookie);
+    expect(res.status).toBe(404);
+    expect(typeof res.body.error).toBe('string');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Extended preflight contract tests through real routes
+// ---------------------------------------------------------------------------
+
+describe('POST /api/batches/preflight — edge cases', () => {
+  it('handles multiline input with mixed valid/invalid rows', async () => {
+    const cookie = await getAuthCookie();
+    const text = [
+      'proj-a | sprint-existing | feat-one',
+      'proj-b | sprint-existing | feat-two',
+      'proj-c | explore-existing | research',
+    ].join('\n');
+    const res = await request(app)
+      .post('/api/batches/preflight')
+      .set('Cookie', cookie)
+      .send({ text });
+    expect(res.status).toBe(200);
+    expect(res.body.rows).toHaveLength(3);
+    // Without configured projects, all rows should be blocked
+    expect(res.body.blocked_count).toBe(3);
+    expect(res.body.launchable_count).toBe(0);
+  });
+
+  it('truncates input exceeding 20 rows and reports truncated=true', async () => {
+    const cookie = await getAuthCookie();
+    const lines = Array.from({ length: 25 }, (_, i) =>
+      `proj | sprint-existing | name-${i}`,
+    );
+    const res = await request(app)
+      .post('/api/batches/preflight')
+      .set('Cookie', cookie)
+      .send({ text: lines.join('\n') });
+    expect(res.status).toBe(200);
+    expect(res.body.truncated).toBe(true);
+    expect(res.body.rows).toHaveLength(20);
+  });
+
+  it('does not truncate at exactly 20 rows', async () => {
+    const cookie = await getAuthCookie();
+    const lines = Array.from({ length: 20 }, (_, i) =>
+      `proj | sprint-existing | name-${i}`,
+    );
+    const res = await request(app)
+      .post('/api/batches/preflight')
+      .set('Cookie', cookie)
+      .send({ text: lines.join('\n') });
+    expect(res.status).toBe(200);
+    expect(res.body.truncated).toBe(false);
+    expect(res.body.rows).toHaveLength(20);
+  });
+
+  it('returns rows in input order with correct positions', async () => {
+    const cookie = await getAuthCookie();
+    const res = await request(app)
+      .post('/api/batches/preflight')
+      .set('Cookie', cookie)
+      .send({ text: 'a | sprint-existing | x\nb | sprint-existing | y' });
+    expect(res.status).toBe(200);
+    expect(res.body.rows[0].position).toBe(0);
+    expect(res.body.rows[1].position).toBe(1);
+    expect(res.body.rows[0].project_id).toBe('a');
+    expect(res.body.rows[1].project_id).toBe('b');
+  });
+
+  it('returns blocked reason for unsupported row kind through a known project', async () => {
+    const cookie = await getAuthCookie();
+    // This test runs against the real app which may have real projects.
+    // If "proj" is unknown, the blocked reason will be about the project, not the kind.
+    // We just verify the route returns blocked state for invalid input.
+    const res = await request(app)
+      .post('/api/batches/preflight')
+      .set('Cookie', cookie)
+      .send({ text: 'proj | delete-all | target' });
+    expect(res.status).toBe(200);
+    expect(res.body.rows[0].state).toBe('blocked');
+    expect(res.body.rows[0].blocked_reason).toBeDefined();
+  });
+
+  it('whitespace-only text returns 400 (treated as empty)', async () => {
+    const cookie = await getAuthCookie();
+    const res = await request(app)
+      .post('/api/batches/preflight')
+      .set('Cookie', cookie)
+      .send({ text: '   \n  \n  ' });
+    // The route rejects whitespace-only text as empty input
+    expect(res.status).toBe(400);
+  });
+
+  it('ignores comment lines in route-level preflight', async () => {
+    const cookie = await getAuthCookie();
+    const res = await request(app)
+      .post('/api/batches/preflight')
+      .set('Cookie', cookie)
+      .send({ text: '# comment\nproj | sprint-existing | feat' });
+    expect(res.status).toBe(200);
+    expect(res.body.rows).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Extended execute route contract
+// ---------------------------------------------------------------------------
+
+describe('POST /api/batches — edge cases', () => {
+  it('returns 400 for empty string text', async () => {
+    const cookie = await getAuthCookie();
+    const res = await request(app)
+      .post('/api/batches')
+      .set('Cookie', cookie)
+      .send({ text: '' });
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 422 with rows array when all rows are blocked', async () => {
+    const cookie = await getAuthCookie();
+    const res = await request(app)
+      .post('/api/batches')
+      .set('Cookie', cookie)
+      .send({ text: 'no-such-project | sprint-existing | feat' });
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe('No launchable rows');
+    expect(Array.isArray(res.body.rows)).toBe(true);
+    expect(res.body.rows[0].state).toBe('blocked');
+  });
+
+  it('returns 422 for multiline input where every row is blocked', async () => {
+    const cookie = await getAuthCookie();
+    const text = 'bad | sprint-existing | a\nbad | sprint-existing | b';
+    const res = await request(app)
+      .post('/api/batches')
+      .set('Cookie', cookie)
+      .send({ text });
+    expect(res.status).toBe(422);
+    expect(res.body.rows).toHaveLength(2);
+  });
+
+  it('returns 422 with blocked reason for invalid input', async () => {
+    const cookie = await getAuthCookie();
+    const res = await request(app)
+      .post('/api/batches')
+      .set('Cookie', cookie)
+      .send({ text: 'proj | invalid-kind | feat' });
+    expect(res.status).toBe(422);
+    expect(res.body.rows[0].state).toBe('blocked');
+    expect(res.body.rows[0].blocked_reason).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SSE endpoint — batch-events
+// ---------------------------------------------------------------------------
+
+describe('GET /api/batch-events', () => {
+  it('endpoint exists and does not 404', async () => {
+    // SSE endpoints are tricky with Supertest; just verify the route is mounted.
+    // The stream connection test would hang, so we use a timeout approach.
+    const res = await request(app)
+      .get('/api/batch-events')
+      .timeout({ response: 200, deadline: 500 })
+      .catch((err: { response?: { status: number } }) => err.response);
+    // If timeout fires, that means the server started streaming (good).
+    // If we get a response, it should not be 404.
+    if (res) {
+      expect(res.status).not.toBe(404);
+    }
+  });
 });

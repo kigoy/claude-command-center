@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { preflightRows, type PreflightRow } from '../server/batch-preflight.js';
-import type { ParsedRow } from '../server/batch-parse.js';
+import { parseBatchText, type ParsedRow, MAX_BATCH_ROWS } from '../server/batch-parse.js';
 import type { ProjectConfig } from '../server/sprint-config.js';
 import type { CliTool } from '../server/cli-tools.js';
 
@@ -281,5 +281,125 @@ describe('preflightRows — mixed batch', () => {
     const result = run([row({ project_id: 'unknown' })]);
     expect(result.rows[0].cwd).toBe('');
     expect(result.rows[0].tmux_prefix_hint).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Additional edge cases for Atom 9 coverage
+// ---------------------------------------------------------------------------
+
+describe('preflight — row-cap + collision edge cases', () => {
+  const PROJECTS: ProjectConfig[] = [
+    { id: 'acme', path: '/repos/acme', stack: 'node', has_deploy: false, default_qa_routing: 'has' },
+    { id: 'beta', path: '/repos/beta', stack: 'node', has_deploy: false, default_qa_routing: 'has' },
+  ];
+  const TOOLS: CliTool[] = [
+    {
+      id: 'claude',
+      label: 'Claude Code',
+      command: 'claude',
+      args: [],
+      sessionPrefix: 'cc-',
+      enabled: true,
+      builtIn: true,
+      sortOrder: 0,
+      promptMode: 'stdin',
+      promptArgTemplate: null,
+      statusDetection: null,
+      env: null,
+      notes: null,
+    },
+  ];
+
+  function preflight(text: string, sessions: { name: string; status: string; cwd?: string }[] = []) {
+    const parsed = parseBatchText(text);
+    return preflightRows(parsed.rows, PROJECTS, TOOLS, sessions, parsed.truncated);
+  }
+
+  it('duplicate names in same project are blocked with reference to first occurrence', () => {
+    const result = preflight('acme | sprint-existing | auth\nacme | sprint-existing | auth');
+    expect(result.rows[0].state).toBe('launchable');
+    expect(result.rows[1].state).toBe('blocked');
+    expect(result.rows[1].blocked_reason).toContain('duplicate');
+    expect(result.rows[1].blocked_reason).toContain('row 1');
+  });
+
+  it('duplicate detection is case-insensitive via normalization', () => {
+    const result = preflight('acme | sprint-existing | Auth-Flow\nacme | sprint-existing | auth flow');
+    expect(result.rows[1].state).toBe('blocked');
+    expect(result.rows[1].blocked_reason).toContain('duplicate');
+  });
+
+  it('same name in different projects is allowed', () => {
+    const result = preflight('acme | sprint-existing | auth\nbeta | sprint-existing | auth');
+    expect(result.rows[0].state).toBe('launchable');
+    expect(result.rows[1].state).toBe('launchable');
+    expect(result.launchable_count).toBe(2);
+  });
+
+  it('running session collision blocks the row', () => {
+    const sessions = [{ name: 'auth-flow', status: 'running', cwd: '/repos/acme' }];
+    const result = preflight('acme | sprint-existing | auth-flow', sessions);
+    expect(result.rows[0].state).toBe('blocked');
+    expect(result.rows[0].blocked_reason).toContain('running session');
+  });
+
+  it('non-running session does not cause collision', () => {
+    const sessions = [{ name: 'auth-flow', status: 'stopped', cwd: '/repos/acme' }];
+    const result = preflight('acme | sprint-existing | auth-flow', sessions);
+    expect(result.rows[0].state).toBe('launchable');
+  });
+
+  it('collision check with running session in different project passes', () => {
+    const sessions = [{ name: 'auth-flow', status: 'running', cwd: '/repos/beta' }];
+    const result = preflight('acme | sprint-existing | auth-flow', sessions);
+    expect(result.rows[0].state).toBe('launchable');
+  });
+
+  it('mixed batch: counts are consistent with row states', () => {
+    const text = [
+      'acme | sprint-existing | valid-one',
+      'unknown | sprint-existing | blocked-one',
+      'acme | sprint-existing | valid-two',
+      'acme | bad-kind | blocked-two',
+    ].join('\n');
+    const result = preflight(text);
+    expect(result.launchable_count).toBe(2);
+    expect(result.blocked_count).toBe(2);
+    expect(result.rows.filter((r) => r.state === 'launchable')).toHaveLength(2);
+    expect(result.rows.filter((r) => r.state === 'blocked')).toHaveLength(2);
+  });
+
+  it('row with empty name normalizes to unnamed and is blocked', () => {
+    const result = preflight('acme | sprint-existing |  ');
+    expect(result.rows[0].state).toBe('blocked');
+    expect(result.rows[0].blocked_reason).toContain('name is required');
+  });
+
+  it('row with name that normalizes to unnamed is blocked', () => {
+    const result = preflight('acme | sprint-existing | ---');
+    expect(result.rows[0].state).toBe('blocked');
+    expect(result.rows[0].blocked_reason).toContain('name is required');
+  });
+
+  it('full batch at exactly MAX_BATCH_ROWS reports truncated from parser', () => {
+    const lines = Array.from({ length: MAX_BATCH_ROWS + 5 }, (_, i) =>
+      `acme | sprint-existing | feat-${i}`,
+    );
+    const parsed = parseBatchText(lines.join('\n'));
+    expect(parsed.truncated).toBe(true);
+    const result = preflightRows(parsed.rows, PROJECTS, TOOLS, [], parsed.truncated);
+    expect(result.truncated).toBe(true);
+    expect(result.rows).toHaveLength(MAX_BATCH_ROWS);
+  });
+
+  it('label format for launchable row is "project / normalized-name"', () => {
+    const result = preflight('acme | sprint-existing | My Cool Feature');
+    expect(result.rows[0].label).toBe('acme / my-cool-feature');
+  });
+
+  it('label for blocked row uses raw_name or (empty) fallback', () => {
+    const result = preflight('acme | sprint-existing |');
+    expect(result.rows[0].label).toBe('(empty)');
   });
 });

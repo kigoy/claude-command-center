@@ -5,11 +5,9 @@
     "moduleResolution": "bundler",
     "esModuleInterop": true,
     "strict": true,
-    "outDir": "dist",
-    "rootDir": "server",
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "noEmit": true
   },
-  "include": ["server/**/*.ts"]
+  "include": ["server/**/*.ts", "shared/**/*.ts"]
 }

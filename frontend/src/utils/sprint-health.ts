@@ -1,4 +1,8 @@
 import type { SprintSummary } from '../types';
+import {
+  isDashboardVisibleSprint as isSharedDashboardVisibleSprint,
+  isStaleSprintSummary,
+} from '../../../shared/sprint-health.js';
 
 export type Health = 'on_track' | 'stale' | 'blocked' | 'waiting' | 'complete';
 
@@ -11,15 +15,13 @@ export const HEALTH_COLORS: Record<Health, string> = {
 };
 
 export function isStaleSprint(sprint: Pick<SprintSummary, 'phase' | 'blocked' | 'last_activity'>): boolean {
-  if (sprint.phase === 'COMPLETE' || sprint.blocked) return false;
-  const hours = (Date.now() - new Date(sprint.last_activity).getTime()) / 3600000;
-  return hours > 4;
+  return isStaleSprintSummary(sprint);
 }
 
 export function isDashboardVisibleSprint(
   sprint: Pick<SprintSummary, 'archived' | 'phase' | 'blocked' | 'last_activity'>,
 ): boolean {
-  return sprint.archived !== true && sprint.phase !== 'COMPLETE' && !isStaleSprint(sprint);
+  return isSharedDashboardVisibleSprint(sprint);
 }
 
 // 8 preset project colors, assigned deterministically via hash

@@ -29,39 +29,13 @@ import { getAutoSprintAction } from './sprint-auto.js';
 import { disableAutomation, enableRecommendedAutomation, isRecommendedAutomationEnabled } from './sprint-automation.js';
 import { executeSprintCommand, getSprintToolId, launchSprintTool } from './sprint-session.js';
 import { listRequests, setResponse } from './mcp-responses.js';
+import {
+  getLastSprintActivity,
+  isStaleSprintState,
+} from '../shared/sprint-health.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const router = Router();
-
-/** Get the most recent timestamp from activity + phase history, falling back to created date. */
-function getLastActivity(state: SprintState): string {
-  const timestamps = new Set<string>();
-
-  if (typeof state.created === 'string' && state.created) {
-    timestamps.add(state.created);
-  }
-
-  for (const entry of state.phase_history as Array<{ exited?: string; entered?: string }>) {
-    if (typeof entry.entered === 'string' && entry.entered) timestamps.add(entry.entered);
-    if (typeof entry.exited === 'string' && entry.exited) timestamps.add(entry.exited);
-  }
-
-  for (const entry of (state.activity_history as Array<{ ts?: string }> | undefined) ?? []) {
-    if (typeof entry?.ts === 'string' && entry.ts) timestamps.add(entry.ts);
-  }
-
-  let latest = state.created;
-  let latestMs = Number.isNaN(new Date(latest).getTime()) ? 0 : new Date(latest).getTime();
-  for (const ts of timestamps) {
-    const ms = new Date(ts).getTime();
-    if (!Number.isNaN(ms) && ms > latestMs) {
-      latest = ts;
-      latestMs = ms;
-    }
-  }
-
-  return latest;
-}
 
 function maxIsoTimestamp(...timestamps: Array<string | null | undefined>): string {
   let latest = '';
@@ -173,7 +147,7 @@ function listSprintsForProject(
 
       const atoms = resolveAtomCounts(featureDir, state);
       const tmuxMatch = findTmuxSession(projectId, state.feature);
-      const lastActivity = maxIsoTimestamp(getLastActivity(state), tmuxMatch?.activityAt, state.created);
+      const lastActivity = maxIsoTimestamp(getLastSprintActivity(state), tmuxMatch?.activityAt, state.created);
       const hasUi = state.qa_routing?.has_ui === true;
       sprints.push({
         feature: state.feature,
@@ -1288,7 +1262,6 @@ router.patch('/settings', (req, res) => {
 router.get('/alerts', (_req, res) => {
   const alerts: Array<{ type: string; message: string; sprintKey: string; severity: string; source: string; timestamp: string }> = [];
   const now = Date.now();
-  const STALE_THRESHOLD_MS = 4 * 3600 * 1000; // 4 hours
 
   try {
     const projects = getProjects();
@@ -1306,7 +1279,7 @@ router.get('/alerts', (_req, res) => {
         if (!state || state.phase === 'COMPLETE') continue;
 
         const key = `${project.id}-${state.feature}`;
-        const lastActivity = getLastActivity(state);
+        const lastActivity = getLastSprintActivity(state);
         const lastMs = new Date(lastActivity).getTime();
 
         if (state.blocked) {
@@ -1318,7 +1291,7 @@ router.get('/alerts', (_req, res) => {
             source: 'sprint',
             timestamp: new Date().toISOString(),
           });
-        } else if (now - lastMs > STALE_THRESHOLD_MS) {
+        } else if (isStaleSprintState(state, now)) {
           const hours = Math.round((now - lastMs) / 3600000);
           alerts.push({
             type: 'stale',

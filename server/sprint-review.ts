@@ -1,8 +1,11 @@
 import { deriveChainStatus, type SprintState } from './sprint-state.js';
+import {
+  getLastSprintActivity,
+  REVIEW_STALE_VALIDITY_THRESHOLD_MS,
+} from '../shared/sprint-health.js';
 
 const PHASE_ORDER = ['PLAN', 'BUILD', 'REVIEW', 'QA', 'SHIP', 'COMPLETE'] as const;
 const PHASE_INDEX = new Map(PHASE_ORDER.map((phase, index) => [phase, index]));
-const STALE_VALIDITY_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface SprintReviewFinding {
   severity: 'info' | 'warning' | 'error';
@@ -34,11 +37,6 @@ type HistoryEntry = {
   entered?: string;
   exited?: string;
 };
-
-function getLastActivity(state: SprintState, history: HistoryEntry[]): string {
-  const last = history[history.length - 1];
-  return last?.exited || last?.entered || state.created;
-}
 
 function hasValidTimestamp(value?: string): boolean {
   return Boolean(value) && !Number.isNaN(new Date(value!).getTime());
@@ -129,10 +127,10 @@ export function reviewSprintState(input: {
     || atomsTotal > 0
     || history.some((entry) => entry.phase !== 'PLAN' || Boolean(entry.exited));
 
-  const lastActivity = getLastActivity(state, history);
+  const lastActivity = getLastSprintActivity(state);
   if (!hasValidTimestamp(lastActivity)) {
     addFinding('warning', 'last_activity_invalid', 'Last activity timestamp is invalid, so recency cannot be trusted.');
-  } else if (state.phase !== 'COMPLETE' && now - new Date(lastActivity).getTime() > STALE_VALIDITY_MS) {
+  } else if (state.phase !== 'COMPLETE' && now - new Date(lastActivity).getTime() > REVIEW_STALE_VALIDITY_THRESHOLD_MS) {
     addFinding('warning', 'stale_validity', 'Sprint has been idle for more than 7 days. Review whether it is still valid.');
   }
 

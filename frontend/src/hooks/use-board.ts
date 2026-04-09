@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { PHASE_ORDER } from '../types';
 import type { DashboardData, SprintSummary } from '../types';
-import { getHealth } from '../utils/sprint-health';
+import { getHealth, isStaleSprint } from '../utils/sprint-health';
 
 export interface BoardSprint extends SprintSummary {
   projectId: string;
@@ -32,6 +32,18 @@ export type BoardFilter = {
   health?: string;
 };
 
+type BoardVisibilitySprint = Pick<SprintSummary, 'archived' | 'phase' | 'blocked' | 'last_activity'>;
+
+export function isBoardVisibleSprint(
+  sprint: BoardVisibilitySprint,
+  options: { filterHealth?: string; showDone?: boolean } = {},
+): boolean {
+  const { filterHealth, showDone = false } = options;
+  if (sprint.archived === true && !showDone) return false;
+  if (!filterHealth && sprint.phase !== 'COMPLETE' && isStaleSprint(sprint)) return false;
+  return true;
+}
+
 export function useBoard(data: DashboardData | null) {
   const [showDone, setShowDone] = useState(false);
   const [filter, setFilter] = useState<BoardFilter>({});
@@ -51,7 +63,7 @@ export function useBoard(data: DashboardData | null) {
     return allSprints.filter((s) => {
       if (filter.project && s.projectId !== filter.project) return false;
       if (filter.health && getHealth(s) !== filter.health) return false;
-      if ((s as any).archived && !showDone) return false;
+      if (!isBoardVisibleSprint(s, { filterHealth: filter.health, showDone })) return false;
       return true;
     });
   }, [allSprints, filter, showDone]);

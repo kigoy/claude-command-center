@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { SprintCard } from './SprintCard';
 import { LinkFolderDialog } from './LinkFolderDialog';
 import type { ProjectSummary } from '../types';
+import { isDashboardVisibleSprint, isStaleSprint } from '../utils/sprint-health';
 
 interface Props {
   project: ProjectSummary;
@@ -15,16 +16,21 @@ interface Props {
 
 export function ProjectGroup({ project, onNewSprint, onOpenTerminal, onProjectLinked, onDeleteSprint, onRemixSprint, onAutoSprint }: Props) {
   const [showCompleted, setShowCompleted] = useState(false);
+  const [showStale, setShowStale] = useState(false);
   const [showLink, setShowLink] = useState(false);
   const visibleSprints = project.sprints.filter((s) => !s.archived);
 
   const active = visibleSprints
-    .filter((s) => s.phase !== 'COMPLETE')
+    .filter((s) => isDashboardVisibleSprint(s))
     .sort((a, b) => {
       if (a.blocked && !b.blocked) return -1;
       if (!a.blocked && b.blocked) return 1;
       return new Date(b.last_activity).getTime() - new Date(a.last_activity).getTime();
     });
+
+  const stale = visibleSprints
+    .filter((s) => s.phase !== 'COMPLETE' && isStaleSprint(s))
+    .sort((a, b) => new Date(b.last_activity).getTime() - new Date(a.last_activity).getTime());
 
   const completed = visibleSprints
     .filter((s) => s.phase === 'COMPLETE')
@@ -43,6 +49,7 @@ export function ProjectGroup({ project, onNewSprint, onOpenTerminal, onProjectLi
             <span className="project-sprint-count">
               {active.length} active
               {blockedCount > 0 && <span className="project-blocked-count">, {blockedCount} blocked</span>}
+              {stale.length > 0 && `, ${stale.length} stale hidden`}
               {completed.length > 0 && `, ${completed.length} done`}
             </span>
             <button className="new-sprint-btn" onClick={() => onNewSprint(project.id)}>
@@ -62,7 +69,7 @@ export function ProjectGroup({ project, onNewSprint, onOpenTerminal, onProjectLi
         </p>
       )}
 
-      {linked && active.length === 0 && completed.length === 0 && (
+      {linked && active.length === 0 && stale.length === 0 && completed.length === 0 && (
         <p className="project-empty">No sprints</p>
       )}
 
@@ -80,6 +87,33 @@ export function ProjectGroup({ project, onNewSprint, onOpenTerminal, onProjectLi
               onAuto={onAutoSprint}
             />
           ))}
+        </div>
+      )}
+
+      {linked && stale.length > 0 && (
+        <div className="completed-section">
+          <button
+            className="completed-toggle"
+            onClick={() => setShowStale(!showStale)}
+          >
+            {showStale ? '▾' : '▸'} {stale.length} stale
+          </button>
+          {showStale && (
+            <div className="sprint-list sprint-list--completed">
+              {stale.map((sprint) => (
+                <SprintCard
+                  key={sprint.feature}
+                  sprint={sprint}
+                  projectId={project.id}
+                  projectPath={project.path}
+                  onOpenTerminal={onOpenTerminal}
+                  onDelete={onDeleteSprint}
+                  onRemix={onRemixSprint}
+                  onAuto={onAutoSprint}
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
 

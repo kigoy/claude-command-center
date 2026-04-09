@@ -773,3 +773,137 @@ For agent workflows, treat "recency" as a merged signal:
 - runtime activity
 
 If you rely on only one, the board will eventually lie.
+
+---
+
+## Dashboard stale sprint follow-up
+
+### 1. Approach
+
+I checked whether the cards were fake UI residue or real sprint records.
+
+They were real:
+- the four `gstack-*` cards exist under `.gstack/.sprints/`
+- `sentry-monitor-health` exists under this repo's `.sprints/`
+- the tmux sessions are also still alive
+
+So I did not delete data. I changed the dashboard to stop treating stale unfinished sprints as current work by default.
+
+### 2. Rejected alternatives
+
+I did not auto-delete or auto-archive these sprints. That would be a product decision with data-loss risk, not a cleanup refactor.
+
+I also did not hide them at the API layer. They still matter for history and recovery, so this belongs in the attention model, not the truth model.
+
+### 3. Connections
+
+This sits right at the boundary between workflow truth and workflow attention.
+
+The sprint files are still true.
+The dashboard attention model was the problem.
+
+So now:
+- fresh unfinished sprints stay visible as active
+- stale unfinished sprints move behind an explicit reveal
+- completed sprints still live in their own section
+
+### 4. Tools
+
+Used:
+- filesystem inspection of `.sprints/` in both repos
+- `tmux ls` to confirm the sessions were genuinely still around
+- targeted Vitest on `sprint-health`
+- frontend production build
+
+### 5. Tradeoffs
+
+This is a visibility change, not a lifecycle change.
+
+Meaning:
+- stale sprints still exist
+- server state still knows about them
+- dashboard clutter drops without destroying recovery paths
+
+If later you want stricter cleanup, that should be a separate policy feature.
+
+### 6. Mistakes
+
+The original dashboard overloaded "not complete" into "active enough to deserve screen space."
+
+That is too naive once you have abandoned planning sessions and long-lived tmux shells.
+
+### 7. Pitfalls
+
+Board view still exposes the full underlying sprint set, because that screen is closer to system truth than the dashboard summary view.
+
+If you want stale hiding to be global, that should be done intentionally everywhere, not piecemeal.
+
+### 8. Expert insights
+
+Workflow tools usually need two different lenses:
+- source of truth
+- source of attention
+
+Using the same rule for both is what creates "why is this still here?" moments.
+
+### 9. Transferable lessons
+
+When users complain about stale objects in a dashboard, first check whether the bug is:
+- bad data
+- bad lifecycle
+- bad visibility defaults
+
+Here it was the third one.
+
+---
+
+## Board visibility follow-up
+
+### 1. Approach
+
+The first fix only touched the dashboard list view.
+
+The board had its own sprint selection logic in `use-board.ts`, so stale sprints were still being admitted there even after the dashboard looked cleaner.
+
+I fixed that by putting the board visibility rule in one helper and applying it before phase columns are built.
+
+### 2. Rejected alternatives
+
+I did not duplicate the stale check inline one more time. That is how this split happened in the first place.
+
+### 3. Connections
+
+This was a classic two-surfaces, two-rules bug:
+- dashboard page
+- board page
+
+Same product concept, different filtering code.
+
+### 4. Tools
+
+Used:
+- board hook trace
+- focused unit test for board visibility
+- frontend build
+
+### 5. Tradeoffs
+
+Stale sprints are hidden by default on the board, but still appear if you explicitly filter for `stale`.
+
+That keeps the board clean without losing recoverability.
+
+### 6. Mistakes
+
+The earlier change solved the symptom you reported in one place, not the rule system-wide.
+
+### 7. Pitfalls
+
+Any future new surface that renders sprint lists should either reuse the same helper or it will drift again.
+
+### 8. Expert insights
+
+Whenever two UI surfaces represent the same entity state, the selection rule should live in one shared helper before design polish starts.
+
+### 9. Transferable lessons
+
+If a bug survives the first fix, check whether the product has parallel code paths that look conceptually identical but are implemented separately.

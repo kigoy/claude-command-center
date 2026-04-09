@@ -19,6 +19,7 @@ import { useBoard } from '../hooks/use-board';
 import { useTerminals } from '../hooks/use-terminals';
 import { useCliTools } from '../hooks/use-cli-tools';
 import { useKeyboardNav } from '../hooks/use-keyboard-nav';
+import { isDashboardVisibleSprint, isStaleSprint } from '../utils/sprint-health';
 import type { DashboardData, LaunchRow, PendingQuestion, TmuxSession } from '../types';
 
 type View = 'dashboard' | 'board' | 'analytics' | 'settings';
@@ -386,6 +387,12 @@ export function MissionControl() {
   const groups = data?.groups ?? [];
   const groupedIds = new Set(groups.flatMap((g) => g.projects));
   const ungrouped = data?.projects.filter((p) => !groupedIds.has(p.id)) ?? [];
+  const visibleDashboardSprintCount = data?.projects.reduce(
+    (n, p) => n + p.sprints.filter((s) => isDashboardVisibleSprint(s)).length, 0,
+  ) ?? 0;
+  const hiddenStaleSprintCount = data?.projects.reduce(
+    (n, p) => n + p.sprints.filter((s) => !s.archived && s.phase !== 'COMPLETE' && isStaleSprint(s)).length, 0,
+  ) ?? 0;
 
   return (
     <div className="mission-control" ref={missionControlRef}>
@@ -465,8 +472,11 @@ export function MissionControl() {
         {!showingTerminal && activeView === 'dashboard' && (
           <div className="dashboard-content">
             {!data && <p className="empty">Loading...</p>}
-            {data && data.projects.reduce((n, p) => n + p.sprints.filter((s) => !s.archived).length, 0) === 0 && (
-              <p className="empty">No active sprints. Use <strong>+ Sprint</strong> in the sidebar to start one.</p>
+            {data && visibleDashboardSprintCount === 0 && (
+              <p className="empty">
+                No current sprints.
+                {hiddenStaleSprintCount > 0 && ` ${hiddenStaleSprintCount} stale sprint${hiddenStaleSprintCount !== 1 ? 's are' : ' is'} hidden below.`}
+              </p>
             )}
             {groups.map((g) => (
               <GroupSection key={g.id} group={g} projects={data?.projects ?? []} onNewSprint={(projectId) => setNewSprintDraft({ projectId })} onOpenTerminal={openTerminalForSprint} onProjectLinked={fetchDashboard} onDeleteSprint={handleDeleteSprint} onRemixSprint={handleRemixSprint} onAutoSprint={handleAutoSprint} />

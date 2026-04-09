@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getHealth, timeAgo, nextAction, getProjectColor } from '../frontend/src/utils/sprint-health.js';
+import { getHealth, timeAgo, nextAction, getProjectColor, isStaleSprint, isDashboardVisibleSprint } from '../frontend/src/utils/sprint-health.js';
 import type { SprintSummary } from '../frontend/src/types.js';
 
 function makeSprint(overrides: Partial<SprintSummary> = {}): SprintSummary {
@@ -36,6 +36,26 @@ describe('getHealth', () => {
   it('returns on_track for recent activity', () => {
     const recent = new Date(Date.now() - 30 * 60 * 1000).toISOString();
     expect(getHealth(makeSprint({ last_activity: recent }))).toBe('on_track');
+  });
+});
+
+describe('dashboard visibility helpers', () => {
+  it('marks old active sprints as stale', () => {
+    const old = new Date(Date.now() - 5 * 3600 * 1000).toISOString();
+    expect(isStaleSprint(makeSprint({ last_activity: old, phase: 'PLAN' }))).toBe(true);
+  });
+
+  it('shows recent unfinished sprints on the dashboard', () => {
+    expect(isDashboardVisibleSprint(makeSprint({ phase: 'PLAN' }))).toBe(true);
+  });
+
+  it('hides stale unfinished sprints from the dashboard default view', () => {
+    const old = new Date(Date.now() - 5 * 3600 * 1000).toISOString();
+    expect(isDashboardVisibleSprint(makeSprint({ phase: 'PLAN', last_activity: old }))).toBe(false);
+  });
+
+  it('hides complete sprints from the dashboard active view', () => {
+    expect(isDashboardVisibleSprint(makeSprint({ phase: 'COMPLETE' }))).toBe(false);
   });
 });
 

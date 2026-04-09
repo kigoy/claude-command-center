@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ProjectGroup } from './ProjectGroup';
 import type { GroupConfig, ProjectSummary } from '../types';
+import { isDashboardVisibleSprint, isStaleSprint } from '../utils/sprint-health';
 
 interface Props {
   group: GroupConfig;
@@ -21,10 +22,13 @@ export function GroupSection({ group, projects, onNewSprint, onOpenTerminal, onP
     .filter((p): p is ProjectSummary => p !== undefined);
 
   const totalActive = groupProjects.reduce(
-    (n, p) => n + p.sprints.filter((s) => !s.archived && s.phase !== 'COMPLETE').length, 0,
+    (n, p) => n + p.sprints.filter((s) => isDashboardVisibleSprint(s)).length, 0,
   );
   const totalBlocked = groupProjects.reduce(
-    (n, p) => n + p.sprints.filter((s) => !s.archived && s.blocked).length, 0,
+    (n, p) => n + p.sprints.filter((s) => isDashboardVisibleSprint(s) && s.blocked).length, 0,
+  );
+  const totalStale = groupProjects.reduce(
+    (n, p) => n + p.sprints.filter((s) => !s.archived && s.phase !== 'COMPLETE' && isStaleSprint(s)).length, 0,
   );
 
   return (
@@ -35,6 +39,7 @@ export function GroupSection({ group, projects, onNewSprint, onOpenTerminal, onP
         <span className="group-stats">
           {totalActive} active sprint{totalActive !== 1 ? 's' : ''}
           {totalBlocked > 0 && <span className="group-blocked">, {totalBlocked} blocked</span>}
+          {totalStale > 0 && <span className="group-blocked">, {totalStale} stale hidden</span>}
         </span>
       </button>
 

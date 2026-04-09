@@ -10,6 +10,18 @@ export const HEALTH_COLORS: Record<Health, string> = {
   complete: '#607d8b',
 };
 
+export function isStaleSprint(sprint: Pick<SprintSummary, 'phase' | 'blocked' | 'last_activity'>): boolean {
+  if (sprint.phase === 'COMPLETE' || sprint.blocked) return false;
+  const hours = (Date.now() - new Date(sprint.last_activity).getTime()) / 3600000;
+  return hours > 4;
+}
+
+export function isDashboardVisibleSprint(
+  sprint: Pick<SprintSummary, 'archived' | 'phase' | 'blocked' | 'last_activity'>,
+): boolean {
+  return sprint.archived !== true && sprint.phase !== 'COMPLETE' && !isStaleSprint(sprint);
+}
+
 // 8 preset project colors, assigned deterministically via hash
 const PROJECT_PALETTE = [
   '#6c63ff', '#e91e63', '#00bcd4', '#ff9800',
@@ -19,8 +31,7 @@ const PROJECT_PALETTE = [
 export function getHealth(sprint: SprintSummary): Health {
   if (sprint.phase === 'COMPLETE') return 'complete';
   if (sprint.blocked) return 'blocked';
-  const hours = (Date.now() - new Date(sprint.last_activity).getTime()) / 3600000;
-  if (hours > 4) return 'stale';
+  if (isStaleSprint(sprint)) return 'stale';
   return 'on_track';
 }
 

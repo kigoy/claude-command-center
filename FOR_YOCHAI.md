@@ -653,3 +653,71 @@ The execute route tests can only verify blocked-row paths (422) because launchin
 - ~2,400 lines of new code across server and frontend
 - 188 tests passing, typecheck clean, frontend build succeeds
 - Atom 9 branch (`atom/9-coverage`) has the full merged tree
+
+---
+
+## Dashboard freshness follow-up
+
+### 1. Approach
+
+I treated this as a data-quality bug, not a frontend rendering bug.
+
+The board was stale for two specific reasons:
+- `last_activity` only looked at `phase_history`, so active automation looked old
+- recommendations still ranked archived sprints
+
+So the fix lives in the summary builder:
+- compute `last_activity` from the newest valid timestamp across `created`, `phase_history`, and `activity_history`
+- exclude archived sprints before calling the recommendation engine
+
+### 2. Rejected alternatives
+
+I did not patch this in the client by hiding archived recommendations after the fact. That would leave the API wrong and any other consumer would still get stale ranking data.
+
+I also did not special-case tmux-active sessions into `last_activity`. The sprint file should remain the canonical product timeline; tmux liveness is separate runtime telemetry.
+
+### 3. Connections
+
+This ties directly into the Auto It work.
+
+Once automation started appending `activity_history`, the dashboard should have started treating those entries as the freshest signal. It did not, so the board looked "stale" even while the workflows were moving.
+
+### 4. Tools
+
+Used:
+- live `/api/dashboard` verification
+- targeted regression test in `tests/sprint-api.test.ts`
+- `npx tsc --noEmit`
+
+### 5. Tradeoffs
+
+Archived sprints still appear in project sprint lists, because that is useful history. They are only excluded from recommendation ranking.
+
+That keeps the board honest without erasing archive visibility.
+
+### 6. Mistakes
+
+The subtle mistake was assuming phase transitions are the only meaningful work signal.
+
+For automated workflows, plenty of important progress happens before a phase changes: commands sent, recommended answers accepted, retries, relaunches.
+
+### 7. Pitfalls
+
+The regression test currently cannot run in this environment because `better-sqlite3` is built against the wrong Node ABI for the test process.
+
+So the code path is fixed and typechecks, the live API confirms the behavior, but the Vitest run still needs the local native module mismatch cleaned up.
+
+### 8. Expert insights
+
+Workflow dashboards rot when they overfit to state-machine milestones and ignore operational events.
+
+If the product has automation, retries, and asynchronous prompts, recency must come from the event stream, not only the phase label.
+
+### 9. Transferable lessons
+
+For workflow products, separate these questions explicitly:
+- what exists
+- what should be recommended
+- what happened most recently
+
+Those are related, but they are not the same query.

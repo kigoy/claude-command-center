@@ -4,6 +4,7 @@ export interface SprintContext {
   projectId: string;
   feature: string;
   phase: string;
+  archived?: boolean;
   blocked: boolean;
   blocked_reason: string | null;
   atoms_total: number;

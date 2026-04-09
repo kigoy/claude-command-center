@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeAll } from 'vitest';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { describe, it, expect, beforeAll, afterEach } from 'vitest';
+import request from 'supertest';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -19,9 +20,11 @@ function setupMockConfig(): string {
 // Set env before importing modules
 const configPath = setupMockConfig();
 process.env.GSTACK_CONFIG = configPath;
+process.env.AUTH_PASSPHRASE = 'test-passphrase';
 
 // Dynamic import after env is set
 const { getProjects, reload } = await import('../server/sprint-config.js');
+const { createApp } = await import('../server/app.js');
 
 describe('sprint-config', () => {
   beforeAll(() => reload());
@@ -100,5 +103,58 @@ describe('sprint API response shapes', () => {
     expect(dashboard[0]).toHaveProperty('path');
     expect(dashboard[0]).toHaveProperty('stack');
     expect(dashboard[0]).toHaveProperty('sprints');
+  });
+
+  afterEach(() => {
+    rmSync(join(MOCK_PROJECTS, 'alpha', '.sprints', 'feat-archived-hot'), { recursive: true, force: true });
+    rmSync(join(MOCK_PROJECTS, 'alpha', '.sprints', 'feat-active-hot'), { recursive: true, force: true });
+  });
+
+  it('GET /api/dashboard ignores archived sprints in recommendations and uses activity history for recency', async () => {
+    const archivedDir = join(MOCK_PROJECTS, 'alpha', '.sprints', 'feat-archived-hot');
+    mkdirSync(archivedDir, { recursive: true });
+    writeFileSync(join(archivedDir, 'STATE.json'), JSON.stringify({
+      feature: 'feat-archived-hot',
+      branch: 'main',
+      created: '2026-04-01T10:00:00Z',
+      phase: 'PLAN',
+      archived: true,
+      phase_history: [{ phase: 'PLAN', entered: '2026-04-01T10:00:00Z' }],
+      activity_history: [{ ts: '2026-04-09T09:00:00Z', title: 'Fresh but archived' }],
+      qa_routing: {},
+      blocked: false,
+      blocked_reason: null,
+    }, null, 2) + '\n');
+
+    const activeDir = join(MOCK_PROJECTS, 'alpha', '.sprints', 'feat-active-hot');
+    mkdirSync(activeDir, { recursive: true });
+    writeFileSync(join(activeDir, 'STATE.json'), JSON.stringify({
+      feature: 'feat-active-hot',
+      branch: 'main',
+      created: '2026-04-01T10:00:00Z',
+      phase: 'PLAN',
+      phase_history: [{ phase: 'PLAN', entered: '2026-04-01T10:00:00Z' }],
+      activity_history: [{ ts: '2026-04-09T10:15:00Z', title: 'Fresh active work' }],
+      qa_routing: {},
+      blocked: false,
+      blocked_reason: null,
+    }, null, 2) + '\n');
+
+    const app = createApp();
+    const agent = request.agent(app);
+    await agent
+      .post('/api/auth/login')
+      .send({ passphrase: 'test-passphrase' })
+      .expect(200);
+
+    const dashboardRes = await agent.get('/api/dashboard').expect(200);
+    const recommendationText = dashboardRes.body.recommendation as string;
+    expect(recommendationText).toContain('feat-active-hot');
+    expect(recommendationText).not.toContain('feat-archived-hot');
+
+    const projectsRes = await agent.get('/api/projects/alpha/sprints').expect(200);
+    const activeSprint = projectsRes.body.find((entry: { feature: string }) => entry.feature === 'feat-active-hot');
+    expect(activeSprint).toBeDefined();
+    expect(activeSprint.last_activity).toBe('2026-04-09T10:15:00Z');
   });
 });

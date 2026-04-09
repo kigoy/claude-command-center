@@ -33,14 +33,34 @@ import { listRequests, setResponse } from './mcp-responses.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const router = Router();
 
-/** Get the most recent timestamp from phase history, falling back to created date. */
+/** Get the most recent timestamp from activity + phase history, falling back to created date. */
 function getLastActivity(state: SprintState): string {
-  const history = state.phase_history as Array<{ exited?: string; entered?: string }>;
-  if (history.length > 0) {
-    const last = history[history.length - 1];
-    return last.exited || last.entered || state.created;
+  const timestamps = new Set<string>();
+
+  if (typeof state.created === 'string' && state.created) {
+    timestamps.add(state.created);
   }
-  return state.created;
+
+  for (const entry of state.phase_history as Array<{ exited?: string; entered?: string }>) {
+    if (typeof entry.entered === 'string' && entry.entered) timestamps.add(entry.entered);
+    if (typeof entry.exited === 'string' && entry.exited) timestamps.add(entry.exited);
+  }
+
+  for (const entry of (state.activity_history as Array<{ ts?: string }> | undefined) ?? []) {
+    if (typeof entry?.ts === 'string' && entry.ts) timestamps.add(entry.ts);
+  }
+
+  let latest = state.created;
+  let latestMs = Number.isNaN(new Date(latest).getTime()) ? 0 : new Date(latest).getTime();
+  for (const ts of timestamps) {
+    const ms = new Date(ts).getTime();
+    if (!Number.isNaN(ms) && ms > latestMs) {
+      latest = ts;
+      latestMs = ms;
+    }
+  }
+
+  return latest;
 }
 
 // --- Types ---
@@ -531,6 +551,7 @@ router.get('/dashboard', (_req, res) => {
       projectId: project.id,
       feature: s.feature,
       phase: s.phase,
+      archived: s.archived,
       blocked: s.blocked,
       blocked_reason: s.blocked_reason,
       atoms_total: s.atoms_total,
@@ -539,7 +560,10 @@ router.get('/dashboard', (_req, res) => {
     })),
   );
 
-  const recommendations = rankRecommendations(allSprints, 3);
+  const recommendations = rankRecommendations(
+    allSprints.filter((s) => !s.archived),
+    3,
+  );
 
   // Backward-compat: single recommendation string = top item's text
   const recommendation = recommendations.length > 0

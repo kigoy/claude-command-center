@@ -907,3 +907,122 @@ Whenever two UI surfaces represent the same entity state, the selection rule sho
 ### 9. Transferable lessons
 
 If a bug survives the first fix, check whether the product has parallel code paths that look conceptually identical but are implemented separately.
+
+---
+
+## Stale tmux session follow-up
+
+### 1. Approach
+
+I treated this as another truth-vs-attention mismatch.
+
+The sidebar was calling `/api/tmux-sessions`, and that endpoint was returning every matched tmux sprint session even if the underlying sprint was already stale and hidden everywhere else.
+
+So I fixed the API surface instead of piling on another frontend filter.
+
+### 2. Rejected alternatives
+
+I did not auto-kill the tmux sessions. That is a destructive cleanup policy, not a visibility fix.
+
+I also did not hide them only in the sidebar. If another surface asks for tmux sessions later, it should get the same answer.
+
+### 3. Connections
+
+This completes the same cleanup arc:
+- dashboard visibility
+- board visibility
+- tmux session visibility
+
+All three now use the same mental model of "current work" instead of each inventing its own.
+
+### 4. Tools
+
+Used:
+- `tmux list-sessions`
+- server trace through `/api/tmux-sessions`
+- focused Vitest coverage
+- frontend build
+
+### 5. Tradeoffs
+
+This hides stale tmux sessions from the app, but leaves the real tmux server untouched.
+
+That is deliberate:
+- safe for user work
+- enough to clean the product UI
+- leaves room for a separate cleanup action later
+
+### 6. Mistakes
+
+The earlier fixes cleaned sprint visibility, but the tmux API still leaked stale work back into the sidebar.
+
+### 7. Pitfalls
+
+If you actually want old tmux sessions terminated, that still needs an explicit cleanup path. This patch does not change process lifecycle.
+
+### 8. Expert insights
+
+Runtime session lists should almost never be shown raw. They need product semantics layered on top, or the UI drifts toward "everything the machine knows about" instead of "everything the user should care about."
+
+### 9. Transferable lessons
+
+When one stale object keeps resurfacing in different views, look for a lower shared feed and fix it there.
+
+---
+
+## Auto-reaping stale tmux sessions follow-up
+
+### 1. Approach
+
+After hiding stale sprint sessions from the UI, I checked the real tmux server and found the deeper issue: stale inactive sprint sessions could still sit around at the process layer and eventually leak back into product surfaces.
+
+So I added a reaping rule to the tmux detection loop itself:
+- if a sprint is stale/hidden
+- and the tmux pane is not actively doing work
+- kill the tmux session during detection
+
+### 2. Rejected alternatives
+
+I did not kill every stale session unconditionally.
+
+That would be too aggressive for sessions still waiting on user input or actively running a tool. The safe rule is stale plus inactive, not stale alone.
+
+### 3. Connections
+
+This finishes the stack:
+- dashboard hides stale sprint cards
+- board hides stale sprint cards
+- tmux sessions API hides stale sprint sessions
+- tmux detector now reaps stale inactive tmux sessions
+
+So the product is no longer just masking the symptom. It also cleans up the underlying stale process state.
+
+### 4. Tools
+
+Used:
+- `tmux capture-pane`
+- `tmux list-sessions`
+- focused helper tests
+- frontend build
+
+### 5. Tradeoffs
+
+I intentionally preserved interactive waiting sessions. If a pane is still clearly asking for input, it is treated as active and not reaped.
+
+That protects in-flight work, even if the sprint is stale on paper.
+
+### 6. Mistakes
+
+The earlier work aligned visibility, but left stale runtime processes alive. That meant the system could regress whenever a lower-level feed surfaced raw tmux state.
+
+### 7. Pitfalls
+
+If `isAgentActive()` ever under-detects a tool's waiting/running state, the reap rule could become too aggressive. That makes the activity detector an important trust boundary.
+
+### 8. Expert insights
+
+Cleanup policies should be attached to the lifecycle observer that already has the right context, not bolted on as one-off maintenance scripts.
+
+### 9. Transferable lessons
+
+When a stale-runtime bug keeps reappearing, do not stop at filtering. Add lifecycle cleanup at the same layer that discovers liveness.

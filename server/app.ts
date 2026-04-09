@@ -42,6 +42,7 @@ import { getToolDisplayLabel } from './session-runtime.js';
 import { handleTerminalSSE, handleTerminalInput } from './terminal.js';
 import { readSprintState } from './sprint-state.js';
 import { isRecommendedAutomationEnabled } from './sprint-automation.js';
+import { shouldExposeTmuxSession } from './tmux-visibility.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -68,6 +69,19 @@ function getSprintStateForRequest(projectId?: string, featureId?: string) {
   const project = getProjects().find((entry) => entry.id === projectId);
   if (!project) return null;
   return readSprintState(join(project.path, '.sprints', featureId));
+}
+
+function getSprintStateForTmuxSession(projectId?: string, featureBase?: string) {
+  if (!projectId || !featureBase) return null;
+  const project = getProjects().find((entry) => entry.id === projectId);
+  if (!project) return null;
+
+  for (const featureId of [featureBase, `feat-${featureBase}`]) {
+    const state = readSprintState(join(project.path, '.sprints', featureId));
+    if (state) return state;
+  }
+
+  return null;
 }
 
 function serializePendingRequest(request: ReturnType<typeof getRequest>) {
@@ -380,7 +394,11 @@ export function createApp(): express.Application {
   // --- Tmux Sprint Sessions ---
 
   app.get('/api/tmux-sessions', (_req, res) => {
-    res.json(getSprintSessions());
+    res.json(
+      getSprintSessions().filter((session) =>
+        shouldExposeTmuxSession(getSprintStateForTmuxSession(session.projectId, session.feature)),
+      ),
+    );
   });
 
   // --- Sessions ---

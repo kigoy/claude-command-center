@@ -1,5 +1,8 @@
 import { execFileSync } from 'child_process';
+import { join } from 'path';
 import { getProjects, getGroups } from './sprint-config.js';
+import { readSprintState } from './sprint-state.js';
+import { shouldAutoKillTmuxSession } from './tmux-visibility.js';
 
 // --- Types ---
 
@@ -103,6 +106,22 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function getSprintState(projectId: string, featureBase: string) {
+  const project = getProjects().find((entry) => entry.id === projectId);
+  if (!project) return null;
+
+  for (const featureId of [featureBase, `feat-${featureBase}`]) {
+    const state = readSprintState(join(project.path, '.sprints', featureId));
+    if (state) return state;
+  }
+
+  return null;
+}
+
+function killTmuxSession(sessionName: string): void {
+  execFileSync('tmux', ['kill-session', '-t', sessionName], { stdio: 'ignore' });
+}
+
 /** Match a tmux session name to a project/feature pair. */
 function matchSession(
   sessionName: string,
@@ -126,12 +145,24 @@ function detectSessions(): void {
   for (const { sessionName, activityAt } of sessions) {
     const matched = matchSession(sessionName, matchers);
     if (!matched) continue;
+    const agentActive = isAgentActive(sessionName);
+    const state = getSprintState(matched.projectId, matched.feature);
+
+    if (shouldAutoKillTmuxSession(state, agentActive)) {
+      try {
+        killTmuxSession(sessionName);
+        console.log(`[tmux-detect] Reaped stale tmux session ${sessionName}`);
+      } catch (err) {
+        console.warn(`[tmux-detect] Failed to reap stale session ${sessionName}: ${err}`);
+      }
+      continue;
+    }
 
     results.push({
       sessionName,
       projectId: matched.projectId,
       feature: matched.feature,
-      agentActive: isAgentActive(sessionName),
+      agentActive,
       activityAt,
     });
   }

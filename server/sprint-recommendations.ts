@@ -99,7 +99,7 @@ function scoreSprint(ctx: SprintContext): number {
 /** Rank all sprints and return top N recommendations */
 export function rankRecommendations(sprints: SprintContext[], limit = 3): Recommendation[] {
   const scored = sprints
-    .filter((s) => s.phase !== 'COMPLETE')
+    .filter((s) => s.phase !== 'COMPLETE' && s.archived !== true)
     .map((ctx) => {
       const score = scoreSprint(ctx);
       const atomsRemaining = ctx.atoms_total - ctx.atoms_completed;

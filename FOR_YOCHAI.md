@@ -721,3 +721,55 @@ For workflow products, separate these questions explicitly:
 - what happened most recently
 
 Those are related, but they are not the same query.
+
+---
+
+## Board freshness hardening follow-up
+
+### 1. Approach
+
+I added a second freshness layer so the board does not depend only on `STATE.json` writes.
+
+The dashboard now has two protections:
+- archived sprints are filtered inside the recommendation engine itself
+- tmux session activity is available as a live fallback signal when terminal work is happening without a new state write
+
+### 2. Rejected alternatives
+
+I did not force every terminal interaction to write `STATE.json`. That would create a lot of noisy state churn and still miss tool-native activity that stays inside tmux.
+
+### 3. Connections
+
+This closes the remaining gap after the earlier dashboard fix:
+- previous fix: use `activity_history`
+- new hardening: if work happens only in tmux, we still have a runtime recency signal
+
+### 4. Tools
+
+Used:
+- tmux `session_activity`
+- pure recommendation test
+- `npx tsc --noEmit`
+
+### 5. Tradeoffs
+
+tmux activity is runtime-only. It improves freshness while a session is alive, but it is not persisted product history. That is correct: runtime liveness and product state should stay separate.
+
+### 6. Pitfalls
+
+This does not make the board magically understand intent. If a tool spins or loops inside tmux, the board may look fresh because the terminal is active. That is still better than looking dead while work is happening, but freshness is not the same as correctness.
+
+### 7. Expert insights
+
+Dashboards get brittle when they trust only durable state or only live telemetry. You want both:
+- durable history for truth
+- live runtime signals for freshness
+
+### 8. Transferable lessons
+
+For agent workflows, treat "recency" as a merged signal:
+- persisted events
+- state-machine transitions
+- runtime activity
+
+If you rely on only one, the board will eventually lie.

@@ -8,6 +8,7 @@ export interface TmuxSprintSession {
   projectId: string;
   feature: string;
   agentActive: boolean;
+  activityAt: string | null;
 }
 
 // --- State ---
@@ -17,15 +18,28 @@ let pollInterval: ReturnType<typeof setInterval> | null = null;
 
 // --- Helpers ---
 
-/** Get all active tmux session names. */
-function listTmuxSessions(): string[] {
+/** Get all active tmux session names with their last activity time. */
+function listTmuxSessions(): Array<{ sessionName: string; activityAt: string | null }> {
   try {
-    const output = execFileSync('tmux', ['list-sessions', '-F', '#{session_name}'], {
+    const output = execFileSync('tmux', ['list-sessions', '-F', '#{session_name}\t#{session_activity}'], {
       encoding: 'utf-8',
       timeout: 3000,
       stdio: ['ignore', 'pipe', 'ignore'],
     });
-    return output.trim().split('\n').filter(Boolean);
+    return output
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        const [sessionName, rawActivity] = line.split('\t');
+        const epochSeconds = Number.parseInt(rawActivity || '', 10);
+        return {
+          sessionName,
+          activityAt: Number.isFinite(epochSeconds) && epochSeconds > 0
+            ? new Date(epochSeconds * 1000).toISOString()
+            : null,
+        };
+      });
   } catch {
     return [];
   }
@@ -105,19 +119,20 @@ function matchSession(
 
 /** Run one detection cycle: list tmux sessions, match to sprints, check recent activity. */
 function detectSessions(): void {
-  const sessionNames = listTmuxSessions();
+  const sessions = listTmuxSessions();
   const matchers = buildSessionMatchers();
 
   const results: TmuxSprintSession[] = [];
-  for (const name of sessionNames) {
-    const matched = matchSession(name, matchers);
+  for (const { sessionName, activityAt } of sessions) {
+    const matched = matchSession(sessionName, matchers);
     if (!matched) continue;
 
     results.push({
-      sessionName: name,
+      sessionName,
       projectId: matched.projectId,
       feature: matched.feature,
-      agentActive: isAgentActive(name),
+      agentActive: isAgentActive(sessionName),
+      activityAt,
     });
   }
 

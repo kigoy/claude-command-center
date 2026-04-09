@@ -18,7 +18,7 @@ import { rankRecommendations, type SprintContext } from './sprint-recommendation
 import { buildRetroSummary, markRetroRun } from './sprint-retro.js';
 import { buildAnalytics } from './sprint-analytics.js';
 import { suggestSkills } from './sprint-suggestions.js';
-import { getSprintSessions } from './tmux-detect.js';
+import { getSprintSessions, type TmuxSprintSession } from './tmux-detect.js';
 import { buildExploreIdeaPrompt, buildSprintBootstrapPrompt } from './sprint-command-help.js';
 import { deleteSprintArtifacts } from './sprint-cleanup.js';
 import { buildSprintRemixPayload } from './sprint-remix.js';
@@ -61,6 +61,22 @@ function getLastActivity(state: SprintState): string {
   }
 
   return latest;
+}
+
+function maxIsoTimestamp(...timestamps: Array<string | null | undefined>): string {
+  let latest = '';
+  let latestMs = -1;
+
+  for (const ts of timestamps) {
+    if (!ts) continue;
+    const ms = new Date(ts).getTime();
+    if (!Number.isNaN(ms) && ms > latestMs) {
+      latest = ts;
+      latestMs = ms;
+    }
+  }
+
+  return latest || new Date(0).toISOString();
 }
 
 // --- Types ---
@@ -106,13 +122,12 @@ function sanitizeSegment(segment: string): string {
 
 /* Atom parsing extracted to sprint-atoms.ts (shared with sprint-sse.ts) */
 
-/** Find a matching tmux session for a sprint from the cached background poller.
- *  Returns the session name if found, null otherwise. */
-function findTmuxSession(projectId: string, feature: string): string | null {
+/** Find a matching tmux session for a sprint from the cached background poller. */
+function findTmuxSession(projectId: string, feature: string): TmuxSprintSession | null {
   const featureBase = feature.replace(/^feat-/, '');
   for (const s of getSprintSessions()) {
     if (s.projectId === projectId && s.feature === featureBase) {
-      return s.sessionName;
+      return s;
     }
   }
   return null;
@@ -158,7 +173,7 @@ function listSprintsForProject(
 
       const atoms = resolveAtomCounts(featureDir, state);
       const tmuxMatch = findTmuxSession(projectId, state.feature);
-      const lastActivity = getLastActivity(state);
+      const lastActivity = maxIsoTimestamp(getLastActivity(state), tmuxMatch?.activityAt, state.created);
       const hasUi = state.qa_routing?.has_ui === true;
       sprints.push({
         feature: state.feature,
@@ -171,7 +186,7 @@ function listSprintsForProject(
         has_atoms: atoms.has_atoms,
         last_activity: lastActivity,
         branch: state.branch,
-        tmux_session: tmuxMatch ?? `${projectId}-${state.feature.replace(/^feat-/, '')}`,
+        tmux_session: tmuxMatch?.sessionName ?? `${projectId}-${state.feature.replace(/^feat-/, '')}`,
         tmux_active: tmuxMatch !== null,
         chain_status: deriveChainStatus(state),
         suggestions: suggestSkills({
@@ -598,7 +613,7 @@ router.get('/sprints/:projectId/:featureId/detail', (req, res) => {
     atoms_total: atoms.total,
     atoms_completed: atoms.completed,
     has_atoms: atoms.has_atoms,
-    tmux_session: tmuxMatch ?? `${project.id}-${state.feature.replace(/^feat-/, '')}`,
+    tmux_session: tmuxMatch?.sessionName ?? `${project.id}-${state.feature.replace(/^feat-/, '')}`,
     tmux_active: tmuxMatch !== null,
     tool_id: getSprintToolId(state),
     automation_enabled: isRecommendedAutomationEnabled(state),

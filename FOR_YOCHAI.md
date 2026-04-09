@@ -221,6 +221,100 @@ Humans read "the prompt contains `/office-hours`" and assume it is fine. The mod
 
 ---
 
+## Repository maintenance follow-up
+
+### 1. Approach
+
+I treated the repo cleanup as a sequence problem, not a beautification problem.
+
+So I started with the lowest-risk structure work first:
+- add a real `AGENTS.md`
+- archive obvious root clutter
+- archive unreachable frontend surfaces
+- centralize duplicated sprint freshness logic
+- split `server/app.ts` into route registrars
+
+Each batch stayed runnable and got its own validation before commit.
+
+### 2. Rejected alternatives
+
+I did not do the tempting "big tidy-up" pass.
+
+That would have mixed:
+- file moves
+- behavior changes
+- dead code removal
+- API reshaping
+
+into one blob that would be hard to review and harder to roll back.
+
+### 3. Connections
+
+The useful connection was that repo organization and product correctness were already linked.
+
+Example:
+- stale sprint rules were duplicated across frontend visibility, tmux exposure, alert generation, and sprint review
+- dead legacy frontend pages were still sitting in active source paths even though the app no longer routed to them
+- `server/app.ts` had become a grab bag because route logic never got promoted into modules
+
+So "cleanup" was actually removing drift pressure from real behavior.
+
+### 4. Tools
+
+Used:
+- repo-wide search with `rg`
+- targeted `tsc` and frontend builds
+- focused Vitest runs for the shared sprint-health logic
+- git diff review before each commit
+
+I also checked the full test suite and found an environment issue:
+- `better-sqlite3` is built against the wrong Node ABI in this machine right now
+
+### 5. Tradeoffs
+
+I archived legacy material instead of deleting it when provenance mattered.
+
+That means the repo is a little larger, but the active tree is cleaner and we still keep:
+- old planning docs
+- unreachable frontend surfaces
+- an audit trail for why those things moved
+
+### 6. Mistakes
+
+The repo had already accumulated a few "harmless" leftovers that were not harmless anymore:
+- tracked local-only `.claude/settings.json`
+- root planning docs mixed with active entry docs
+- dead routes and CSS living beside the real app
+
+None of those break immediately. They just make every future change noisier.
+
+### 7. Pitfalls
+
+The main live pitfall now is environmental, not logical:
+- full Vitest still fails until `better-sqlite3` is rebuilt for the current Node version
+
+Also, the next big batch is `server/sprint-api.ts`, and that one needs discipline. It is large enough that a rushed split would create subtle regressions.
+
+### 8. Expert insights
+
+There is a difference between "code that is unused" and "code that is unreachable."
+
+Unreachable code is more dangerous in product repos because people keep mentally budgeting for it. They assume it might still matter, so it taxes navigation and slows confident edits.
+
+Archiving unreachable surfaces is one of the fastest ways to make a repo feel smaller without lying about history.
+
+### 9. Transferable lessons
+
+When a repo starts feeling sticky, do the first maintenance wave in this order:
+- clarify repo rules
+- archive non-active material
+- centralize duplicated decision logic
+- turn giant assembly files into assemblers again
+
+That order gives you cleaner future refactors without forcing a rewrite.
+
+---
+
 ## Terminal Auto-Answer follow-up
 
 ### 1. Approach

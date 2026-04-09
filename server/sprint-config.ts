@@ -22,6 +22,7 @@ export interface ProjectScanCandidate {
   id: string;
   name: string;
   path: string;
+  group?: string;
   alreadyConfigured: boolean;
   configuredProjectId: string | null;
   hasGit: boolean;
@@ -98,6 +99,47 @@ function parseGroups(config: GstackConfig): GroupConfig[] {
     label: group.label,
     projects: [...group.projects],
   }));
+}
+
+function normalizeProjectId(name: string): string {
+  const normalized = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+
+  return normalized || name.trim().toLowerCase();
+}
+
+function listDirectories(dirPath: string): string[] {
+  try {
+    return readdirSync(dirPath, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+      .map((entry) => entry.name);
+  } catch {
+    return [];
+  }
+}
+
+function buildScanCandidate(
+  dirPath: string,
+  name: string,
+  configuredByPath: Map<string, string>,
+  group?: string,
+): ProjectScanCandidate {
+  const configuredProjectId = configuredByPath.get(dirPath) || null;
+  return {
+    id: normalizeProjectId(name),
+    name,
+    path: dirPath,
+    group,
+    alreadyConfigured: !!configuredProjectId,
+    configuredProjectId,
+    hasGit: existsSync(join(dirPath, '.git')),
+    hasClaudeMd: existsSync(join(dirPath, 'CLAUDE.md')),
+    hasSprints: existsSync(join(dirPath, '.sprints')),
+  };
 }
 
 /** Load projects from config.yaml. Caches result until reload(). */
@@ -233,24 +275,40 @@ export function scanProjectCandidates(basePath = '/Volumes/Extreme Pro'): Projec
   const configuredByPath = new Map(configured.map((project) => [project.path, project.id]));
 
   try {
-    return readdirSync(basePath, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
-      .map((entry) => {
-        const path = join(basePath, entry.name);
-        const configuredProjectId = configuredByPath.get(path) || null;
-        return {
-          id: entry.name.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || entry.name.toLowerCase(),
-          name: entry.name,
-          path,
-          alreadyConfigured: !!configuredProjectId,
-          configuredProjectId,
-          hasGit: existsSync(join(path, '.git')),
-          hasClaudeMd: existsSync(join(path, 'CLAUDE.md')),
-          hasSprints: existsSync(join(path, '.sprints')),
-        };
-      })
-      .filter((candidate) => candidate.hasGit || candidate.hasClaudeMd || candidate.hasSprints)
-      .sort((a, b) => Number(b.hasSprints) - Number(a.hasSprints) || Number(b.hasGit) - Number(a.hasGit) || a.name.localeCompare(b.name));
+    const candidates: ProjectScanCandidate[] = [];
+
+    for (const entryName of listDirectories(basePath)) {
+      const entryPath = join(basePath, entryName);
+      const topLevelCandidate = buildScanCandidate(entryPath, entryName, configuredByPath);
+
+      if (topLevelCandidate.hasGit || topLevelCandidate.hasClaudeMd || topLevelCandidate.hasSprints) {
+        candidates.push(topLevelCandidate);
+      }
+
+      if (topLevelCandidate.hasGit) {
+        continue;
+      }
+
+      for (const childName of listDirectories(entryPath)) {
+        const childPath = join(entryPath, childName);
+        const nestedCandidate = buildScanCandidate(
+          childPath,
+          childName,
+          configuredByPath,
+          normalizeProjectId(entryName),
+        );
+
+        if (nestedCandidate.hasGit || nestedCandidate.hasClaudeMd || nestedCandidate.hasSprints) {
+          candidates.push(nestedCandidate);
+        }
+      }
+    }
+
+    return candidates.sort((a, b) =>
+      Number(b.hasSprints) - Number(a.hasSprints)
+      || Number(b.hasGit) - Number(a.hasGit)
+      || a.name.localeCompare(b.name),
+    );
   } catch {
     return [];
   }

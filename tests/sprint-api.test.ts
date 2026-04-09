@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import request from 'supertest';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, mkdtempSync } from 'fs';
+import { tmpdir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -23,7 +24,7 @@ process.env.GSTACK_CONFIG = configPath;
 process.env.AUTH_PASSPHRASE = 'test-passphrase';
 
 // Dynamic import after env is set
-const { getProjects, reload } = await import('../server/sprint-config.js');
+const { getProjects, reload, scanProjectCandidates } = await import('../server/sprint-config.js');
 const { createApp } = await import('../server/app.js');
 
 describe('sprint-config', () => {
@@ -82,6 +83,38 @@ describe('sprint filesystem reading', () => {
     const sprintsDir = join(MOCK_PROJECTS, 'beta/.sprints');
     // beta has no .sprints/ dir — should not throw
     expect(existsSync(sprintsDir)).toBe(false);
+  });
+
+  it('scans nested repos under non-repo parent folders and infers the group', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'sprint-scan-'));
+    const topLevelRepo = join(tempRoot, 'file-brain');
+    const nestedRepo = join(tempRoot, 'leelafy', 'Proof-outreach');
+
+    mkdirSync(join(topLevelRepo, '.git'), { recursive: true });
+    mkdirSync(nestedRepo, { recursive: true });
+    writeFileSync(join(nestedRepo, '.git'), 'gitdir: /tmp/mock-worktree\n');
+
+    try {
+      const candidates = scanProjectCandidates(tempRoot);
+
+      expect(candidates).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: 'file-brain',
+          path: topLevelRepo,
+          group: undefined,
+          hasGit: true,
+        }),
+        expect.objectContaining({
+          id: 'proof-outreach',
+          path: nestedRepo,
+          group: 'leelafy',
+          hasGit: true,
+        }),
+      ]));
+      expect(candidates.some((candidate) => candidate.path === join(tempRoot, 'leelafy'))).toBe(false);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
   });
 });
 

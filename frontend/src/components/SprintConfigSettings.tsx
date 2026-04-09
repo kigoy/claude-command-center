@@ -20,6 +20,7 @@ interface ScanCandidate {
   id: string;
   name: string;
   path: string;
+  group?: string;
   alreadyConfigured: boolean;
   configuredProjectId: string | null;
   hasGit: boolean;
@@ -122,6 +123,7 @@ export function SprintConfigSettings({ onConfigChanged }: Props) {
                     body: JSON.stringify({
                       path: candidate.path,
                       name: candidate.id,
+                      group: candidate.group,
                       stack: 'other',
                       has_deploy: false,
                     }),
@@ -132,6 +134,7 @@ export function SprintConfigSettings({ onConfigChanged }: Props) {
                 </button>
               </div>
               <div className="settings-badge-row">
+                {candidate.group && <span className="cli-tool-state">group: {candidate.group}</span>}
                 {candidate.hasGit && <span className="cli-tool-state">git</span>}
                 {candidate.hasClaudeMd && <span className="cli-tool-state">CLAUDE.md</span>}
                 {candidate.hasSprints && <span className="cli-tool-state">.sprints</span>}

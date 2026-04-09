@@ -259,6 +259,74 @@ Example:
 
 So "cleanup" was actually removing drift pressure from real behavior.
 
+---
+
+## Nested project scan follow-up
+
+### 1. Approach
+
+I fixed this at the scanner, not in config data.
+
+The bug was simple: project scan only looked one directory deep under `/Volumes/Extreme Pro`. So a real repo like `leelafy/Proof-outreach` never made it into candidates even though its `.git` marker existed.
+
+The fix was:
+- keep scanning top-level projects as before
+- if a top-level folder is not itself a git repo, scan its direct children too
+- preserve the parent folder as an inferred `group`
+- normalize mixed-case child names like `Proof-outreach` into `proof-outreach`
+
+### 2. Rejected alternatives
+
+I did not hardcode special handling for `leelafy`.
+
+I also did not change the persisted config format. This is discovery logic, so the right place to fix it is candidate generation.
+
+### 3. Connections
+
+This connected three surfaces that were slightly out of sync:
+- backend candidate scan
+- frontend scan results UI
+- project creation flow
+
+Before the patch, even if the backend found a nested project later, the UI would not carry the inferred group into `Add Project`. Now the scan result includes `group`, shows it, and passes it through on add.
+
+### 4. Tools
+
+Used:
+- repo trace in `server/sprint-config.ts`
+- targeted frontend wiring in `SprintConfigSettings`
+- `vitest`
+- `npm run build`
+- direct live scan verification against `/Volumes/Extreme Pro`
+
+### 5. Tradeoffs
+
+I kept the nested walk to one extra level only.
+
+That is enough for the current `/Volumes/Extreme Pro/{group}/{repo}` layout and avoids turning project scan into an open-ended recursive crawl.
+
+### 6. Mistakes
+
+The original scan logic conflated "top-level folder" with "project root." That works until teams start grouping repos under umbrella folders, which is exactly what happened here.
+
+### 7. Pitfalls
+
+If someone nests repos deeper than two levels, they still will not show up. That is deliberate for now.
+
+Also, if the server process is already running, this fix only appears after restart or reload because the code path lives in the backend process.
+
+### 8. Expert insights
+
+Repo detection should treat `.git` as a marker, not assume it is always a directory.
+
+Worktrees and some repo setups use a `.git` file, and scanners that only think in terms of `.git/` directories quietly miss valid repositories.
+
+### 9. Transferable lessons
+
+When discovery UIs feel "random," check the traversal boundary first.
+
+A shallow scan bug often looks like bad state, bad config, or bad caching from the user side, but the real issue is usually just one missing directory level.
+
 ### 4. Tools
 
 Used:

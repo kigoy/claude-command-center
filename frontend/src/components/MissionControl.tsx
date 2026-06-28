@@ -1,11 +1,11 @@
-import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { TerminalPanel } from './TerminalPanel';
 import { GroupSection } from './GroupSection';
 import { PipelineBoard } from './PipelineBoard';
 import { CommandPalette } from './CommandPalette';
-import { NewSprintDialog } from './NewSprintDialog';
+import { NewSprintDialog, type SprintCreatedResult } from './NewSprintDialog';
 import { ExploreIdeaDialog } from './ExploreIdeaDialog';
 import { AddProjectDialog } from './AddProjectDialog';
 import { BatchCreateOverlay } from './BatchCreateOverlay';
@@ -63,6 +63,30 @@ export function MissionControl() {
   } = useTerminals({ data, onActivate: clearView });
 
   const totalCards = columns.reduce((n, col) => n + col.sprints.length, 0);
+
+  const preferredProjectId = useMemo(() => {
+    const projects = data?.projects ?? [];
+    if (projects.length === 0) return undefined;
+
+    if (selectedSprint) {
+      const selected = allSprints.find((s) => `${s.projectId}-${s.feature}` === selectedSprint);
+      if (selected) return selected.projectId;
+    }
+
+    if (activeTerminalId) {
+      const activeTerminal = openTerminals.find((term) => term.id === activeTerminalId);
+      const terminalProjectId = activeTerminal?.name.split(' / ')[0]?.trim();
+      if (terminalProjectId && projects.some((project) => project.id === terminalProjectId)) {
+        return terminalProjectId;
+      }
+    }
+
+    if (filter.project && projects.some((project) => project.id === filter.project)) {
+      return filter.project;
+    }
+
+    return projects[0]?.id;
+  }, [activeTerminalId, allSprints, data?.projects, filter.project, openTerminals, selectedSprint]);
 
   const handleEscapeTerminal = useCallback(() => {
     setActiveTerminalId(null);
@@ -219,6 +243,11 @@ export function MissionControl() {
 
   const ACTION_TOAST_DURATION_MS = 3_500;
 
+  const showActionToast = useCallback((msg: string, ok: boolean) => {
+    setActionToast({ msg, ok });
+    setTimeout(() => setActionToast(null), ACTION_TOAST_DURATION_MS);
+  }, []);
+
   async function postJson(url: string, body: object) {
     const res = await fetch(url, {
       method: 'POST',
@@ -268,6 +297,22 @@ export function MissionControl() {
       setTimeout(() => setActionToast(null), ACTION_TOAST_DURATION_MS);
     }
   }, [fetchDashboard, fetchTmux]);
+
+  const handleCreatedSprintToast = useCallback((result: {
+    projectId: string;
+    feature: string;
+    autoCreated: boolean;
+    autoError?: string;
+  }) => {
+    const featureShort = result.feature.replace(/^feat-/, '');
+    if (result.autoCreated) {
+      showActionToast(`Created ${result.projectId}/${featureShort} and started Auto It`, true);
+      return;
+    }
+    if (result.autoError) {
+      showActionToast(`Created ${result.projectId}/${featureShort}, but Auto It failed: ${result.autoError}`, false);
+    }
+  }, [showActionToast]);
 
   const handleArchive = useCallback(async (projectId: string, feature: string) => {
     try {
@@ -425,9 +470,10 @@ export function MissionControl() {
         onSelectView={handleSelectView}
         onSelectSession={openTerminalForSession}
         onNewSprint={(projectId) => setNewSprintDraft({ projectId })}
-        onExploreIdea={() => setExploreIdeaDraft({})}
+        onExploreIdea={() => setExploreIdeaDraft({ projectId: preferredProjectId, mode: 'existing' })}
         onAddProject={() => setShowAddProject(true)}
         onBatchCreate={() => setShowBatchCreate(true)}
+        defaultProjectId={preferredProjectId}
         batchCreateTriggerRef={batchCreateTriggerRef}
       />
 
@@ -552,10 +598,18 @@ export function MissionControl() {
           defaultProjectId={newSprintDraft.projectId}
           initialFeatureName={newSprintDraft.featureName}
           onClose={() => setNewSprintDraft(null)}
-          onCreated={(result) => {
+          onCreated={(result?: SprintCreatedResult) => {
             setNewSprintDraft(null);
             fetchDashboard();
             fetchTmux();
+            if (result) {
+              handleCreatedSprintToast({
+                projectId: result.project,
+                feature: result.feature,
+                autoCreated: result.autoCreated,
+                autoError: result.autoError,
+              });
+            }
             if (result?.session) {
               const project = data.projects.find((p) => p.id === result.project);
               openTerminalByTmuxName(result.session, project?.path || '/tmp', selectedToolId);
@@ -578,6 +632,7 @@ export function MissionControl() {
             setExploreIdeaDraft(null);
             fetchDashboard();
             fetchTmux();
+            handleCreatedSprintToast(result);
             if (result?.session) openTerminalByTmuxName(result.session, result.path, selectedToolId);
           }}
           toolId={selectedToolId}

@@ -10,6 +10,8 @@ export interface SprintCreatedResult {
   feature: string;
   project: string;
   session: string;
+  autoCreated: boolean;
+  autoError?: string;
 }
 
 interface Props {
@@ -24,6 +26,7 @@ interface Props {
 export function NewSprintDialog({ projects, defaultProjectId, initialFeatureName, toolId, onClose, onCreated }: Props) {
   const [projectId, setProjectId] = useState(defaultProjectId || projects[0]?.id || '');
   const [featureName, setFeatureName] = useState(initialFeatureName || '');
+  const [autoCreate, setAutoCreate] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -47,7 +50,25 @@ export function NewSprintDialog({ projects, defaultProjectId, initialFeatureName
 
       if (res.ok) {
         const result = await res.json();
-        onCreated(result);
+        let autoError: string | undefined;
+
+        if (autoCreate) {
+          const autoRes = await fetch(`/api/sprints/${result.project}/${result.feature}/auto`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+          });
+          if (!autoRes.ok) {
+            const autoData = await autoRes.json().catch(() => ({}));
+            autoError = autoData.error || 'Failed to auto-run sprint';
+          }
+        }
+
+        onCreated({
+          ...result,
+          autoCreated: autoCreate && !autoError,
+          autoError,
+        });
       } else {
         const data = await res.json();
         setError(data.error || 'Failed to create sprint');
@@ -92,6 +113,18 @@ export function NewSprintDialog({ projects, defaultProjectId, initialFeatureName
             Creates .sprints/feat-{featureName.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') || '...'}
           </span>
         </label>
+
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={autoCreate}
+            onChange={(e) => setAutoCreate(e.target.checked)}
+          />
+          Auto Create
+        </label>
+        <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>
+          Immediately runs Auto It after the sprint is created.
+        </span>
 
         {error && <p className="error">{error}</p>}
 

@@ -13,7 +13,14 @@ interface Props {
   initialProjectId?: string;
   initialGroupId?: string;
   onClose: () => void;
-  onCreated: (result: { session: string; path: string }) => void;
+  onCreated: (result: {
+    session: string;
+    path: string;
+    projectId: string;
+    feature: string;
+    autoCreated: boolean;
+    autoError?: string;
+  }) => void;
 }
 
 export function ExploreIdeaDialog({
@@ -33,6 +40,7 @@ export function ExploreIdeaDialog({
   const [description, setDescription] = useState(initialDescription || '');
   const [projectId, setProjectId] = useState(initialProjectId || projects[0]?.id || '');
   const [groupId, setGroupId] = useState(initialGroupId || groups[0]?.id || '');
+  const [autoCreate, setAutoCreate] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -56,7 +64,28 @@ export function ExploreIdeaDialog({
       });
       if (res.ok) {
         const result = await res.json();
-        onCreated({ session: result.session, path: result.path });
+        let autoError: string | undefined;
+
+        if (autoCreate) {
+          const autoRes = await fetch(`/api/sprints/${result.projectId}/${result.feature}/auto`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+          });
+          if (!autoRes.ok) {
+            const autoData = await autoRes.json().catch(() => ({}));
+            autoError = autoData.error || 'Failed to auto-run sprint';
+          }
+        }
+
+        onCreated({
+          session: result.session,
+          path: result.path,
+          projectId: result.projectId,
+          feature: result.feature,
+          autoCreated: autoCreate && !autoError,
+          autoError,
+        });
       } else {
         const data = await res.json();
         setError(data.error || 'Failed to create idea');
@@ -139,6 +168,18 @@ export function ExploreIdeaDialog({
             </select>
           </label>
         )}
+
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={autoCreate}
+            onChange={(e) => setAutoCreate(e.target.checked)}
+          />
+          Auto Create
+        </label>
+        <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>
+          Immediately runs Auto It after the idea sprint is created.
+        </span>
 
         {error && <p className="error">{error}</p>}
 

@@ -25,17 +25,18 @@ interface Props {
   onExploreIdea: () => void;
   onAddProject: () => void;
   onBatchCreate: () => void;
+  defaultProjectId?: string;
   batchCreateTriggerRef?: React.RefObject<HTMLButtonElement | null>;
 }
 
 export function Sidebar({
   data, tmuxSessions, activeView, activeTerminalId, openTerminals,
   unreadSessions, cliTools, selectedToolId, onSelectTool, onSelectView, onSelectSession, onNewSprint,
-  onExploreIdea, onAddProject, onBatchCreate, batchCreateTriggerRef,
+  onExploreIdea, onAddProject, onBatchCreate, defaultProjectId, batchCreateTriggerRef,
 }: Props) {
   const groups = data?.groups ?? [];
   const projects = data?.projects ?? [];
-  const defaultProjectId = projects[0]?.id ?? null;
+  const resolvedDefaultProjectId = defaultProjectId ?? projects[0]?.id ?? null;
   // Keep a local ref so we can fall back if caller doesn't provide one
   const localBtnRef = useRef<HTMLButtonElement>(null);
   const btnRef = batchCreateTriggerRef ?? localBtnRef;
@@ -73,9 +74,9 @@ export function Sidebar({
         <button
           className="mc-sidebar-shortcut"
           onClick={() => {
-            if (defaultProjectId) onNewSprint(defaultProjectId);
+            if (resolvedDefaultProjectId) onNewSprint(resolvedDefaultProjectId);
           }}
-          disabled={!defaultProjectId}
+          disabled={!resolvedDefaultProjectId}
         >
           + Sprint
         </button>

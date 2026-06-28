@@ -327,6 +327,128 @@ When discovery UIs feel "random," check the traversal boundary first.
 
 A shallow scan bug often looks like bad state, bad config, or bad caching from the user side, but the real issue is usually just one missing directory level.
 
+---
+
+## Auto Create on sprint creation follow-up
+
+### 1. Approach
+
+I added `Auto Create` at the moment the user creates work, not somewhere later in sprint actions.
+
+That keeps the intent where it belongs:
+- user creates a sprint or idea
+- user optionally says "also kick off Auto It immediately"
+- the UI creates the sprint first, then calls the existing sprint auto-run endpoint
+
+### 2. Rejected alternatives
+
+I did not add a separate post-create modal or force users to click `Auto It` manually after the dialog closes.
+
+That would preserve the old friction and make the checkbox meaningless.
+
+### 3. Connections
+
+This ties together three existing pieces that were already present but disconnected:
+- `New Sprint` creation
+- `Explore Idea` creation
+- the existing `/api/sprints/:projectId/:featureId/auto` backend route
+
+So this is not a new automation engine. It is better orchestration of the one already in the product.
+
+### 4. Tools
+
+Used:
+- frontend dialog tracing
+- Mission Control callback wiring
+- existing sprint auto endpoint
+- `npm run build`
+
+### 5. Tradeoffs
+
+I kept this as a frontend orchestration change.
+
+That means creation and auto-run are still two sequential requests:
+- create sprint
+- auto-run sprint
+
+If auto-run fails, the sprint still exists and the terminal still opens. That is safer than pretending the whole operation was atomic.
+
+### 6. Mistakes
+
+The earlier flow assumed creation and kickoff were separate user intents. In practice, for rapid ideation, they are often one intent.
+
+### 7. Pitfalls
+
+If Auto It fails after creation, the user now gets a partial-failure toast instead of a broken retry path. That is correct, but worth remembering when debugging reports like "it created but didn’t start."
+
+Also, there is still no dedicated frontend component test harness in this repo, so validation for this batch is the production build rather than a dialog-level test.
+
+### 8. Expert insights
+
+Workflow products feel much faster when the most likely next click becomes a checkbox on the current form instead of a second action on the next screen.
+
+### 9. Transferable lessons
+
+Whenever you already have a reliable follow-up action, do not build a new "magic" system first. Start by letting users opt into that existing action at creation time.
+
+---
+
+## Project context targeting follow-up
+
+### 1. Approach
+
+I fixed this as a context-selection bug in the frontend.
+
+The backend already knew about `proof-outreach`. The real problem was that the global `+ Sprint` and `Explore Idea` actions were not carrying your current project context forward. They defaulted to the first project in the list unless you manually changed the dropdown.
+
+### 2. Rejected alternatives
+
+I did not add special handling for `proof-outreach`.
+
+I also did not move this logic into the backend, because the bug was not project lookup. It was the UI choosing the wrong default target before the request was sent.
+
+### 3. Connections
+
+This now lines up three pieces of context that already existed in Mission Control:
+- selected sprint card
+- active terminal session
+- current board project filter
+
+The global create actions now use that context to decide which project should be preselected.
+
+### 4. Tools
+
+Used:
+- code trace through Mission Control and Sidebar
+- config verification for `proof-outreach`
+- `npm run build`
+
+### 5. Tradeoffs
+
+I used a simple priority order:
+- selected sprint
+- active terminal
+- board filter
+- first configured project
+
+That is predictable and low-risk without introducing extra persistent UI state.
+
+### 6. Mistakes
+
+The earlier implementation treated the global actions as context-free shortcuts. That is fine for tiny project lists, but wrong once the user is actively working inside a specific project.
+
+### 7. Pitfalls
+
+If no project context exists at all, the UI still falls back to the first configured project. That fallback is intentional, but it is still a fallback.
+
+### 8. Expert insights
+
+Creation flows in multi-project tools should almost never be "global" in practice. Even when the button is global, the user's current working context usually tells you what they mean.
+
+### 9. Transferable lessons
+
+When users say "it created in the wrong place," check the frontend default-target logic before blaming the write path.
+
 ### 4. Tools
 
 Used:

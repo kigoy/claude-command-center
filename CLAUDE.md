@@ -8,16 +8,14 @@ Sprint Command is the development workflow engine.
 
 On every session start:
 - read `/Volumes/Extreme Pro/.gstack/orchestrator.md`
-- follow its Session Start instructions
-- treat the orchestrator as the workflow source of truth
+- follow its Session Start instructions (detect project, ask what to work on)
 
 Primary paths:
 - Orchestrator: `/Volumes/Extreme Pro/.gstack/orchestrator.md`
 - Skills: `/Volumes/Extreme Pro/.gstack/skills/`
-- Sprint state: each project's `.sprints/` directory
-- Sprint help prompt: `SPRINT_COMMAND_HELP.md`
+- Load skills on demand by name. No sprint state is tracked.
 
-The orchestrator decides which skill to load for the current phase. Do not invent a parallel workflow.
+Do not invent a parallel workflow.
 
 ## Post-task
 

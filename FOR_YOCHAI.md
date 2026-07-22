@@ -1,5 +1,19 @@
 # For Yochai
 
+## 2026-07-22 — Synthetic panel bench v2
+
+Quick one over coffee: you asked for v2 of the synthetic panel validation bench, and here's the twist — v1 (`synthetic-panel-bench.jsx`) wasn't actually in the repo, or anywhere in git history. So I built the whole thing fresh as one self-contained file at the repo root, implementing the full v2 spec.
+
+The fun design decision: everything above the `COMPONENT` marker in the file is deliberately JSX-free. That let me slice the file at the marker, drop it into Node as a plain module, and run a real study end-to-end against a mocked model API — 29 checks, including the one you flagged: counts must sum to panel size before any share gets computed, in both batch and per-respondent modes. Malformed model responses retry 3x, then the study fails loudly instead of quietly skewing the scatter.
+
+Per-respondent mode samples personas from actual US census marginals (each dimension sums to 1.0 — tested), runs the calls in chunks of 4 so we don't hammer the API, and the mode toggle tells you the call cost up front. Stats are honest for n=5: t(4)=2.776 for the CI, not a lazy 1.96. Pearson r gets a percentile bootstrap (2000 resamples) since 8 studies is far too few to trust an asymptotic interval.
+
+It's a standalone artifact-style file — not wired into the vite build — so `npm test` (216 green) and `tsc --noEmit` (clean) are untouched. PR is up as a draft: #1.
+
+---
+
+## Previous: Sprint remix
+
 ## 1. Approach
 
 I treated this as a workflow memory problem.
